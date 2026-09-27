@@ -1,6 +1,6 @@
 # Financial-Sector Requirements Engineering Assistant
 
-The project is a requirements engineering assistant for software across the financial sector, with a domain-aware architecture that can be extended across financial services. Trade Finance / Letter of Credit is one representative domain and the seeded project example; this does not claim complete domain knowledge or functionality for every service. Phase 4 builds on the application foundation in [Phase 1](docs/phase-1-use-case-definition.md) and adds a project-independent knowledge base for trusted reference documents, deterministic extraction/chunking, local embedding generation, and source-linked semantic search. Search returns evidence chunks; it does not generate requirements or regulatory conclusions or execute financial operations.
+The project is a requirements engineering assistant for software across the financial sector, with a domain-aware architecture that can be extended across financial services. Trade Finance / Letter of Credit is one representative domain and the seeded project example; this does not claim complete domain knowledge or functionality for every service. Phase 4 provides project-independent, source-linked evidence retrieval. Phase 5 adds candidate requirement extraction from READY project inputs using a configurable local generative LLM. It does not perform requirement quality analysis, regulatory conclusions, or financial operations.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ React + Vite frontend (127.0.0.1:5173)
         ▼
 Node.js + Express API (localhost:4000)
         ├── PostgreSQL + pgvector (localhost:5432)
-        └── Ollama embedding service (localhost:11434)
+        └── Ollama local model APIs (localhost:11434; separate embedding and generation models)
 ```
 
 The frontend uses the API for application data. The API owns validation, extraction and database access. Ollama generates pretrained local text embeddings; pgvector stores and searches them alongside source-linked chunks. Financial-domain metadata supports filtering evidence within the shared knowledge base. The seeded example project is “Trade Finance / Letter of Credit Requirements Project”.
@@ -33,14 +33,15 @@ backend/
     config.js              # environment configuration
     db/pool.js             # PostgreSQL pool
     middleware/            # centralized error responses
-    routes/                # health, projects, inputs, users, and knowledge APIs
-  test/                    # API, project, input, and knowledge-base tests
+    routes/                # health, projects, inputs, users, knowledge, and requirements APIs
+  test/                    # API, project, input, knowledge-base, and extraction tests
 database/schema.sql        # application tables and representative Trade Finance project
 docs/
   phase-1-use-case-definition.md
   phase-2-application-foundation.md
   phase-3-input-document-processing.md
   phase-4-knowledge-base-rag-foundation.md
+  phase-5-llm-requirement-extraction.md
 frontend/
   src/                     # React app, pages, components, API client, styles
   vite.config.js
@@ -121,6 +122,9 @@ No local PostgreSQL installation is required. Packages are installed independent
 | `OLLAMA_BASE_URL` | API | Local Ollama server base URL (default `http://localhost:11434`) |
 | `OLLAMA_EMBEDDING_MODEL` | API | Ollama embedding model; must produce 768 dimensions (default `embeddinggemma`) |
 | `OLLAMA_TIMEOUT_MS` | API | Embedding request timeout (default `120000`) |
+| `OLLAMA_GENERATION_BASE_URL` | API | Ollama chat API base URL for requirement extraction (default `http://localhost:11434`) |
+| `OLLAMA_GENERATION_MODEL` | API | Generative model for Phase 5 (default `qwen2.5:3b`; install manually, never downloaded by the app) |
+| `OLLAMA_GENERATION_TIMEOUT_MS` | API | Generation request timeout (default `120000`) |
 | `KB_DOCUMENT_EMBEDDING_PREFIX` | API | Document embedding task prefix/template |
 | `KB_QUERY_EMBEDDING_PREFIX` | API | Search query embedding task prefix/template |
 | `KB_UPLOAD_STORAGE_DIR` | API | Generated-name reference file storage directory |
@@ -155,8 +159,11 @@ All endpoints are under `/api` and return JSON.
 | `GET` | `/api/knowledge/documents/:id` | Retrieve knowledge document metadata and extracted text |
 | `GET` | `/api/knowledge/documents/:id/chunks` | Retrieve ordered chunks with source-document metadata |
 | `POST` | `/api/knowledge/search` | Retrieve semantically relevant evidence chunks and source metadata |
+| `POST` | `/api/projects/:projectId/requirements/extract` | Extract candidates from a READY input (`inputId`) |
+| `GET` | `/api/projects/:projectId/requirements` | List candidate requirements for a project with source-input references |
+| `GET` | `/api/requirements/:id` | Retrieve one candidate with evidence and source-input metadata |
 
-Knowledge document uploads require a `financialDomain` from the supported domain taxonomy. Search may include `filters.financialDomain` to restrict retrieval; without it, the shared knowledge base is searched across domains. See [Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md) for the supported values and API details.
+Knowledge document uploads require a `financialDomain` from the supported domain taxonomy. Search may include `filters.financialDomain` to restrict retrieval; without it, the shared knowledge base is searched across domains. See [Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md) for the supported values and API details. Phase 5 extraction uses `OLLAMA_GENERATION_MODEL`, separate from the Phase 4 embedding model; see [Phase 5 documentation](docs/phase-5-llm-requirement-extraction.md) for setup and behavior.
 
 Supported project statuses are `DRAFT`, `ACTIVE`, and `ARCHIVED`. Supported role labels are `ADMIN`, `BUSINESS_STAKEHOLDER`, `REQUIREMENTS_ENGINEER`, `TECHNICAL_STAKEHOLDER`, `COMPLIANCE`, `SECURITY`, `RISK`, `PROJECT_MANAGER`, and `APPROVER`.
 
@@ -175,4 +182,4 @@ Phase 4 setup and verification details are in [the Phase 4 documentation](docs/p
 
 ## Intentionally deferred
 
-This foundation does not include production authentication/authorization, MFA, LLM requirement generation, autonomous agents, requirement extraction/classification, clarification, compliance/security/risk decisions, approval workflows, SRS/story/acceptance criteria generation, hallucination detection, SDLC recommendations, advanced audit, or deployment of a banking system. User records and role labels are data-model foundations only; they do not enforce access control. Phase 4 retrieves evidence only and does not generate requirements.
+This foundation does not include production authentication/authorization, MFA, autonomous agents, requirement quality/classification analysis, clarification, compliance/security/risk decisions, approval workflows, SRS/story/acceptance criteria generation, hallucination detection, SDLC recommendations, advanced audit, or deployment of a banking system. Phase 5 candidate extraction is source-based only and is not RAG-enabled analysis. User records and role labels are data-model foundations only; they do not enforce access control.

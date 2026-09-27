@@ -68,6 +68,33 @@ CREATE INDEX IF NOT EXISTS project_inputs_project_created_idx
 CREATE INDEX IF NOT EXISTS project_inputs_status_idx
   ON project_inputs (processing_status);
 
+CREATE TABLE IF NOT EXISTS candidate_requirements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_input_id UUID NOT NULL REFERENCES project_inputs(id) ON DELETE CASCADE,
+  requirement_text TEXT NOT NULL CHECK (length(trim(requirement_text)) BETWEEN 1 AND 3000),
+  requirement_type TEXT NOT NULL CHECK (requirement_type IN (
+    'FUNCTIONAL', 'NON_FUNCTIONAL', 'BUSINESS_RULE', 'CONSTRAINT', 'OTHER', 'UNKNOWN'
+  )),
+  priority TEXT CHECK (priority IS NULL OR priority IN ('HIGH', 'MEDIUM', 'LOW', 'UNKNOWN')),
+  source_evidence TEXT NOT NULL CHECK (length(trim(source_evidence)) BETWEEN 1 AND 10000),
+  source_evidence_start INTEGER NOT NULL CHECK (source_evidence_start >= 0),
+  source_evidence_end INTEGER NOT NULL CHECK (source_evidence_end > source_evidence_start),
+  confidence NUMERIC(4,3) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  assumptions TEXT[] NOT NULL DEFAULT '{}',
+  extraction_status TEXT NOT NULL DEFAULT 'COMPLETED'
+    CHECK (extraction_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS candidate_requirements_project_idx
+  ON candidate_requirements (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS candidate_requirements_source_input_idx
+  ON candidate_requirements (source_input_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS candidate_requirements_status_idx
+  ON candidate_requirements (extraction_status);
+
 CREATE TABLE IF NOT EXISTS knowledge_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title VARCHAR(200) NOT NULL CHECK (length(trim(title)) > 0),

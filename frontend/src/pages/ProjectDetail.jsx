@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import StatusPill from '../components/StatusPill.jsx';
 import { api } from '../api.js';
 import ProjectInputs from '../components/ProjectInputs.jsx';
+import ProjectRequirements from '../components/ProjectRequirements.jsx';
 
 export default function ProjectDetail() {
   const { projectId } = useParams();
@@ -28,8 +29,9 @@ export default function ProjectDetail() {
         <article className="detail-card"><span className="eyebrow">OWNERSHIP</span><h2>{project.ownerName || 'Unassigned'}</h2><p>Project owner</p></article>
         <article className="detail-card"><span className="eyebrow">CREATED</span><h2>{new Date(project.createdAt).toLocaleDateString()}</h2><p>Last updated {new Date(project.updatedAt).toLocaleDateString()}</p></article>
       </div>
-      <div className="advisory-note"><span className="note-icon">i</span><p><strong>Foundation only.</strong> AI-assisted analysis, requirements generation, and compliance recommendations are planned for later phases.</p></div>
+      <div className="advisory-note"><span className="note-icon">i</span><p><strong>Candidate extraction.</strong> Phase 5 can extract source-linked candidate requirements from READY inputs. Requirement quality analysis and compliance recommendations are planned for later phases.</p></div>
       <ProjectInputs projectId={projectId} />
+      <ProjectRequirements projectId={projectId} />
     </section>
   );
 }

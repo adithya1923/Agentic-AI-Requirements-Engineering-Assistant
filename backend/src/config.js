@@ -26,6 +26,11 @@ export const config = {
     chunkOverlapChars: Number(process.env.KB_CHUNK_OVERLAP_CHARS || 150),
     maxSearchTopK: Number(process.env.KB_MAX_SEARCH_TOP_K || 20),
   },
+  generation: {
+    ollamaBaseUrl: (process.env.OLLAMA_GENERATION_BASE_URL || 'http://localhost:11434').replace(/\/$/, ''),
+    model: process.env.OLLAMA_GENERATION_MODEL || 'qwen2.5:3b',
+    timeoutMillis: Number(process.env.OLLAMA_GENERATION_TIMEOUT_MS || 120_000),
+  },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',
     port: Number(process.env.DATABASE_PORT || 5432),

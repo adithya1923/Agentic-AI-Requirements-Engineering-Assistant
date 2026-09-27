@@ -47,4 +47,9 @@ export const api = {
   knowledgeDocument: (id) => request(`/knowledge/documents/${encodeURIComponent(id)}/chunks`),
   uploadKnowledgeDocument: (formData) => request('/knowledge/documents', { method: 'POST', body: formData }),
   searchKnowledge: (body) => request('/knowledge/search', { method: 'POST', body: JSON.stringify(body) }),
+  projectRequirements: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements`),
+  extractRequirements: (projectId, inputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/extract`, {
+    method: 'POST', body: JSON.stringify({ inputId }),
+  }),
+  requirement: (id) => request(`/requirements/${encodeURIComponent(id)}`),
 };
