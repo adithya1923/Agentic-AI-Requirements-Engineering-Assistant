@@ -1,0 +1,22 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!frontend/.env.example
+
+# Dependencies and build output
+node_modules/
+frontend/dist/
+backend/dist/
+coverage/
+
+# Logs and local database artifacts
+*.log
+database/data/
+pgdata/
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

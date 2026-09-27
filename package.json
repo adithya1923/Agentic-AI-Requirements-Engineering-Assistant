@@ -1,0 +1,13 @@
+{
+  "name": "trade-finance-requirements-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Phase 2 application foundation for the Trade Finance requirements engineering assistant",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "db:init": "npm --prefix backend run db:init",
+    "build:frontend": "npm --prefix frontend run build",
+    "test:backend": "npm --prefix backend test"
+  }
+}
