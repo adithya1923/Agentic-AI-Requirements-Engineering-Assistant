@@ -1,6 +1,6 @@
-# Requirements Engineering Assistant for Trade Finance and Letters of Credit
+# Financial-Sector Requirements Engineering Assistant
 
-Phase 3 builds on the application foundation for the project defined in [Phase 1](docs/phase-1-use-case-definition.md). It lets a team create projects and collect source text and documents for the selected Trade Finance / Letter of Credit domain. Document processing extracts text only; it does not interpret requirements. It does not process LCs or banking transactions and contains no AI analysis functionality.
+The project is a requirements engineering assistant for software across the financial sector, with a domain-aware architecture that can be extended across financial services. Trade Finance / Letter of Credit is one representative domain and the seeded project example; this does not claim complete domain knowledge or functionality for every service. Phase 4 builds on the application foundation in [Phase 1](docs/phase-1-use-case-definition.md) and adds a project-independent knowledge base for trusted reference documents, deterministic extraction/chunking, local embedding generation, and source-linked semantic search. Search returns evidence chunks; it does not generate requirements or regulatory conclusions or execute financial operations.
 
 ## Architecture
 
@@ -9,18 +9,18 @@ React + Vite frontend (127.0.0.1:5173)
         │ HTTP / JSON
         ▼
 Node.js + Express API (localhost:4000)
-        │ PostgreSQL driver
-        ▼
-PostgreSQL 16 via Docker Compose (localhost:5432)
+        ├── PostgreSQL + pgvector (localhost:5432)
+        └── Ollama embedding service (localhost:11434)
 ```
 
-The frontend uses the API for all project data. The API owns validation, database access, and structured error responses. The initial project context is seeded as “Trade Finance / Letter of Credit Requirements Project”.
+The frontend uses the API for application data. The API owns validation, extraction and database access. Ollama generates pretrained local text embeddings; pgvector stores and searches them alongside source-linked chunks. Financial-domain metadata supports filtering evidence within the shared knowledge base. The seeded example project is “Trade Finance / Letter of Credit Requirements Project”.
 
 ## Technology
 
 - Frontend: React 18, Vite 5, React Router 6, JavaScript
 - Backend: Node.js ES modules, Express 4, `pg`, `dotenv`, and `cors`
-- Database: PostgreSQL 16, initialized by an idempotent SQL script
+- Database: PostgreSQL 16 with pgvector, initialized by an idempotent SQL script
+- Local embeddings: Ollama with `embeddinggemma` (768 dimensions)
 - Local database: Docker Compose with a named persistent volume
 
 ## Project structure
@@ -33,13 +33,14 @@ backend/
     config.js              # environment configuration
     db/pool.js             # PostgreSQL pool
     middleware/            # centralized error responses
-    routes/                # health, projects, and users APIs
-  test/                    # API, project, and input processing tests
-database/schema.sql        # users, projects, inputs, and initial LC project
+    routes/                # health, projects, inputs, users, and knowledge APIs
+  test/                    # API, project, input, and knowledge-base tests
+database/schema.sql        # application tables and representative Trade Finance project
 docs/
   phase-1-use-case-definition.md
   phase-2-application-foundation.md
   phase-3-input-document-processing.md
+  phase-4-knowledge-base-rag-foundation.md
 frontend/
   src/                     # React app, pages, components, API client, styles
   vite.config.js
@@ -51,6 +52,7 @@ docker-compose.yml         # PostgreSQL only
 
 - Node.js 20 or later and npm
 - Docker Desktop with Docker Compose enabled
+- Ollama 0.11.10 or later with `embeddinggemma` downloaded
 
 No local PostgreSQL installation is required. Packages are installed independently in `backend` and `frontend`; each has its own lockfile.
 
@@ -65,14 +67,21 @@ No local PostgreSQL installation is required. Packages are installed independent
    npm --prefix frontend install
    ```
 
-4. Start PostgreSQL:
+4. Pull the pgvector PostgreSQL image and start PostgreSQL (the named PostgreSQL volume remains in use):
 
    ```powershell
-   docker compose up -d postgres
+   docker compose pull postgres
+   docker compose up -d --force-recreate postgres
    docker compose ps
    ```
 
-5. Initialize the schema and initial Trade Finance / LC project:
+5. Download the local embedding model:
+
+   ```powershell
+   ollama pull embeddinggemma
+   ```
+
+6. Initialize the schema and seeded representative Trade Finance / LC project:
 
    ```powershell
    npm run db:init
@@ -80,19 +89,19 @@ No local PostgreSQL installation is required. Packages are installed independent
 
    The script is repeatable and does not delete existing records.
 
-6. In one terminal, start the API:
+7. In one terminal, start the API:
 
    ```powershell
    npm run dev:backend
    ```
 
-7. In another terminal, start the frontend:
+8. In another terminal, start the frontend:
 
    ```powershell
    npm run dev:frontend
    ```
 
-8. Open `http://127.0.0.1:5173`. The dashboard and projects page load rows through the API. Create a project, open its detail page, and refresh; it should remain available from PostgreSQL.
+9. Open `http://127.0.0.1:5173`. The dashboard and projects page load rows through the API. Visit Knowledge Base to upload PDF/DOCX/TXT reference documents, inspect chunks, and search for source-linked evidence.
 
 ## Environment variables
 
@@ -109,6 +118,15 @@ No local PostgreSQL installation is required. Packages are installed independent
 | `API_PORT` | API | HTTP port for Express (default `4000`) |
 | `FRONTEND_ORIGIN` | API | Allowed local browser origin (default `http://127.0.0.1:5173`) |
 | `VITE_API_BASE_URL` | Frontend | API base URL (default `http://localhost:4000/api`) |
+| `OLLAMA_BASE_URL` | API | Local Ollama server base URL (default `http://localhost:11434`) |
+| `OLLAMA_EMBEDDING_MODEL` | API | Ollama embedding model; must produce 768 dimensions (default `embeddinggemma`) |
+| `OLLAMA_TIMEOUT_MS` | API | Embedding request timeout (default `120000`) |
+| `KB_DOCUMENT_EMBEDDING_PREFIX` | API | Document embedding task prefix/template |
+| `KB_QUERY_EMBEDDING_PREFIX` | API | Search query embedding task prefix/template |
+| `KB_UPLOAD_STORAGE_DIR` | API | Generated-name reference file storage directory |
+| `KB_MAX_CHUNK_CHARS` | API | Deterministic chunk window (default `1200`) |
+| `KB_CHUNK_OVERLAP_CHARS` | API | Chunk overlap (default `150`) |
+| `KB_MAX_SEARCH_TOP_K` | API | Maximum search result count (default `20`) |
 
 Vite reads `frontend/.env.local`. Only `VITE_` variables are exposed to browser code; never put secrets in such variables.
 
@@ -132,6 +150,13 @@ All endpoints are under `/api` and return JSON.
 | `GET` | `/api/inputs/:id/content` | Retrieve submitted or extracted text |
 | `GET` | `/api/users` | List development user/role records |
 | `POST` | `/api/users` | Create a development user/role record (`displayName`, `email`, optional `role`) |
+| `POST` | `/api/knowledge/documents` | Upload and ingest one PDF, DOCX, or TXT reference with metadata |
+| `GET` | `/api/knowledge/documents` | List knowledge document metadata and chunk counts |
+| `GET` | `/api/knowledge/documents/:id` | Retrieve knowledge document metadata and extracted text |
+| `GET` | `/api/knowledge/documents/:id/chunks` | Retrieve ordered chunks with source-document metadata |
+| `POST` | `/api/knowledge/search` | Retrieve semantically relevant evidence chunks and source metadata |
+
+Knowledge document uploads require a `financialDomain` from the supported domain taxonomy. Search may include `filters.financialDomain` to restrict retrieval; without it, the shared knowledge base is searched across domains. See [Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md) for the supported values and API details.
 
 Supported project statuses are `DRAFT`, `ACTIVE`, and `ARCHIVED`. Supported role labels are `ADMIN`, `BUSINESS_STAKEHOLDER`, `REQUIREMENTS_ENGINEER`, `TECHNICAL_STAKEHOLDER`, `COMPLIANCE`, `SECURITY`, `RISK`, `PROJECT_MANAGER`, and `APPROVER`.
 
@@ -146,6 +171,8 @@ npm test --prefix backend
 
 With Docker running, the end-to-end check is: start Compose, run `npm run db:init`, start the API and frontend, verify `/api/health` and `/api/health/db`, create a project in the UI, and verify it appears in the project list and detail view after a reload. The database-backed flow requires Docker/PostgreSQL and cannot be replaced by static frontend data.
 
+Phase 4 setup and verification details are in [the Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md).
+
 ## Intentionally deferred
 
-This foundation does not include production authentication/authorization, MFA, AI agents, LLM calls, RAG, embeddings, knowledge ingestion, requirement extraction or analysis, compliance/security/risk engines, clarification, SRS/story/acceptance criteria generation, traceability automation, SDLC recommendations, advanced audit, or deployment of a banking system. User records and role labels are data-model foundations only; they do not enforce access control. These boundaries follow Phase 1 and the original project statement.
+This foundation does not include production authentication/authorization, MFA, LLM requirement generation, autonomous agents, requirement extraction/classification, clarification, compliance/security/risk decisions, approval workflows, SRS/story/acceptance criteria generation, hallucination detection, SDLC recommendations, advanced audit, or deployment of a banking system. User records and role labels are data-model foundations only; they do not enforce access control. Phase 4 retrieves evidence only and does not generate requirements.

@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Projects from './pages/Projects.jsx';
 import ProjectDetail from './pages/ProjectDetail.jsx';
 import InputDetail from './pages/InputDetail.jsx';
+import KnowledgeBase from './pages/KnowledgeBase.jsx';
 
 function App() {
   const [projects, setProjects] = useState([]);
@@ -49,6 +50,7 @@ function App() {
         <nav className="main-nav" aria-label="Main navigation">
           <NavLink end to="/">Overview</NavLink>
           <NavLink to="/projects">Projects</NavLink>
+          <NavLink to="/knowledge">Knowledge Base</NavLink>
         </nav>
         <div className="topbar-right"><span className={`connection ${apiStatus}`}><i />{apiStatus === 'checking' ? 'Connecting' : apiStatus === 'online' ? 'API connected' : 'API offline'}</span><div className="avatar" title="Local workspace">W</div></div>
       </header>
@@ -59,11 +61,12 @@ function App() {
           <Route path="/projects" element={<Projects projects={projects} loading={loading} error={error} onCreate={() => setFormOpen(true)} />} />
           <Route path="/projects/:projectId/inputs/:inputId" element={<InputDetail />} />
           <Route path="/projects/:projectId" element={<ProjectDetail />} />
+          <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="*" element={<section className="page-section"><h1>Page not found</h1><Link to="/">Return to overview</Link></section>} />
         </Routes>
       </main>
 
-      <footer className="footer"><span>Trade Finance Requirements Assistant <span className="footer-dot">·</span> Phase 2 foundation</span><span>Letter of Credit</span></footer>
+      <footer className="footer"><span>Financial-Sector Requirements Assistant <span className="footer-dot">·</span> Phase 4 retrieval foundation</span><span>Multi-domain</span></footer>
 
       {formOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setFormOpen(false); }}><ProjectForm onCreate={createProject} onCancel={() => setFormOpen(false)} /></div>}
     </div>

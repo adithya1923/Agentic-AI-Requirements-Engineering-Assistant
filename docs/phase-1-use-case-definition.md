@@ -1,16 +1,16 @@
-# Agentic AI Requirements Engineering Assistant for Trade Finance and Letters of Credit
+# Agentic AI Requirements Engineering Assistant for Financial Services
 
 ## 1. Project Title
 
-**Agentic AI Requirements Engineering Assistant for Trade Finance and Letters of Credit**
+**Agentic AI Requirements Engineering Assistant for Financial Services**
 
 ## 2. Problem Statement
 
 Financial-sector software requirements can come from many stakeholders and from conversations, policies, existing systems, and other documents. The problem statement identifies manual gathering and analysis as time-consuming and prone to ambiguity, inconsistency, omissions, weak stakeholder alignment, and rework. In a security-sensitive and changing environment, teams also need to connect requirements to evidence, controls, risks, and appropriate delivery practices.
 
-This project defines an agentic AI-based requirements engineering assistant for a Trade Finance/Letter-of-Credit (LC) software context. It will help authorised users collect and analyse stakeholder and reference material; extract, classify, clarify, and validate requirements; identify quality issues and potential compliance, security, privacy, and risk concerns; preserve evidence and traceability; and draft engineering artefacts and a justified SDLC recommendation/workflow. It is advisory: people remain responsible for business and regulatory decisions and approve critical outputs.
+This project defines a domain-general, agentic AI-based requirements engineering assistant for software across the financial sector, with domain-aware support for multiple financial-service domains. It will help authorised users collect and analyse stakeholder and reference material; extract, classify, clarify, and validate requirements; identify quality issues and potential compliance, security, privacy, and risk concerns; preserve evidence and traceability; and draft engineering artefacts and a justified SDLC recommendation/workflow. Domain-specific requirements and workflows depend on the target financial-service project. Trade Finance/Letter of Credit (LC) is one representative domain, not the exclusive scope. The architecture is intended to be extensible; this does not claim complete prebuilt domain knowledge or functionality for every financial service. The assistant is advisory: people remain responsible for business and regulatory decisions and approve critical outputs.
 
-The project is not the LC processing system. It will not issue LCs, process trade documents, move money, settle payments, or make bank, legal, or regulatory decisions.
+The project is a requirements engineering assistant, not an operational financial system. It will not execute banking, payment, loan, LC, insurance, investment, or other financial operations; move money; or make binding business, legal, or regulatory decisions.
 
 ## 3. Project Objective
 
@@ -50,7 +50,7 @@ The complete project is intended to include the following capabilities. Phase 1 
 - Multi-agent coordination with workflow/orchestration, shared context, agent responsibilities, scoped permissions, and approval gates.
 - Security and trust controls identified in Section 15, plus auditability and model/knowledge-base versioning.
 - Evaluation against conventional requirements engineering practices using representative financial-sector case studies and the measures listed in Section 17.
-- Initial project application limited to the selected Trade Finance/LC requirements context. Extending the assistant to other financial services is not included in the initial use case.
+- Domain-general architecture for requirements engineering across financial-service projects, with domain-aware support that can be extended as domain-specific knowledge and workflows are provided. Trade Finance/LC is one representative supported domain; target-domain requirements and workflows must be elicited for each project.
 
 ## 5. Out of Scope
 
@@ -63,15 +63,15 @@ The following are outside this project’s requirements-engineering assistant bo
 - Autonomous approval of requirements, regulatory interpretations, SDLC adoption, production readiness, or deployment.
 - Autonomous production deployment.
 - Training a custom foundation LLM.
-- Expanding the initial project use case to all financial services listed in the problem statement.
+- Claiming complete prebuilt knowledge or complete domain-specific functionality for every financial service.
 
-## 6. Selected Financial Domain
+## 6. Financial-Sector Scope and Representative Domain
 
-**Selected domain:** Trade Finance / Letter of Credit.
+**Overall scope:** Financial-sector requirements engineering across multiple financial-service domains.
 
-The project concerns requirements for software that may support an LC-related business process. The assistant itself supports requirements engineering for that software; it does not perform the business process.
+The architecture is domain-general and extensible. Example domain identifiers include `GENERAL_FINANCIAL`, `DIGITAL_BANKING`, `LOANS_CREDIT`, `PAYMENTS`, `FRAUD_DETECTION`, `INSURANCE`, `INVESTMENT`, `REGULATORY_REPORTING`, `CUSTOMER_ONBOARDING_KYC`, `FINANCIAL_DATA_ANALYTICS`, `TRADE_FINANCE`, and `OTHER_FINANCIAL`. These identify project context; they do not imply that complete domain knowledge or finished domain-specific workflows are already present. Domain-specific requirements and workflows depend on the target financial-service project.
 
-The source problem statement permits selecting a financial use case and lists a range of possible examples, but does not specify LC. Selecting LC is a **Project Decision**. Participants and process steps below are **Domain Assumptions** for a representative scenario, not claims that the problem statement requires a particular LC operating model.
+Trade Finance/Letter of Credit is a **Project Decision** as one representative financial-service domain. The LC participants and process steps below are **Domain Assumptions** for an illustrative scenario, not claims that the problem statement requires a particular LC operating model or that LC is the exclusive system scope.
 
 ## 7. Domain Context
 
@@ -81,7 +81,7 @@ A representative LC scenario may involve an importer/applicant requesting an LC 
 
 ### B. Our Agentic AI Requirements Engineering System
 
-The assistant is used by stakeholders and the software team to gather and analyse requirements for a proposed LC-supporting software project. It processes submitted statements and authorised evidence, highlights uncertainty and possible gaps, asks clarifying questions, and drafts structured artefacts for review. Its analyses and mappings are advisory and evidence-linked. Authorised humans resolve business conflicts, decide interpretations, and approve baselines and other gated outputs.
+The assistant is used by stakeholders and the software team to gather and analyse requirements for a proposed financial-service software project, including an LC-supporting project where that is the target domain. It processes submitted statements and authorised evidence, highlights uncertainty and possible gaps, asks clarifying questions, and drafts structured artefacts for review. Its analyses and mappings are advisory and evidence-linked. Authorised humans resolve business conflicts, decide interpretations, and approve baselines and other gated outputs.
 
 ## 8. Domain Workflow
 
@@ -104,8 +104,8 @@ The actual LC process, participants, exceptions, and business rules must be elic
 
 | Boundary question | Definition |
 |---|---|
-| What the system does | Assists requirements elicitation, analysis, evidence linkage, validation, traceability, artefact drafting, and SDLC recommendation/workflow generation for the selected software project. |
-| What it does not do | Execute LC or banking operations, make binding compliance/legal determinations, make final business decisions, or autonomously deploy software. |
+| What the system does | Assists requirements elicitation, analysis, evidence linkage, validation, traceability, artefact drafting, and SDLC recommendation/workflow generation for financial-service software projects across domain contexts. |
+| What it does not do | Execute banking, payment, loan, LC, insurance, investment, or other financial operations; make binding compliance/legal determinations or final business decisions; or autonomously deploy software. |
 | Who decides | Stakeholders authorised by the project decide business matters; compliance/legal officers decide regulatory interpretations; designated project, architecture, security, and compliance stakeholders approve SDLC selection as applicable. |
 | What counts as evidence | Submitted stakeholder statements and authorised, identified reference material (such as applicable policies, control material, regulations, legacy documentation, and project artefacts), with provenance/version/applicability recorded where available. An AI-generated statement is not itself authoritative evidence. |
 | Where approval is needed | At the gates in Section 14, including baselines, high-impact interpretations and risks, conflicts, SDLC selection, approved-requirement changes, and production readiness. |
@@ -149,7 +149,7 @@ The following input classes are identified in the problem statement. Trade Finan
 | Project characteristics | Stability, criticality, complexity, risk, size, legacy dependence, change rate, delivery needs, stakeholder availability, testing/documentation, budget and schedule, verification needs, and failure consequences | Inform SDLC selection and workflow tailoring | Stakeholder input / supporting evidence |
 | Authorised knowledge-base items | Versioned terminology, business processes, policies, regulations, controls, guidelines, rules, templates, and approved prior documents | Ground generation and analysis in approved sources | Reference knowledge |
 
-For knowledge items, the source statement calls for source, jurisdiction, effective date, version, and applicability metadata. For the LC use case, the appropriate jurisdiction and applicable sources are not specified here and must be supplied/confirmed by authorised stakeholders.
+For knowledge items, the source statement calls for source, jurisdiction, effective date, version, and applicability metadata. The target financial-service domain, applicable jurisdiction, and applicable sources must be supplied or confirmed by authorised stakeholders for each project.
 
 ## 12. System Outputs
 
@@ -237,14 +237,14 @@ The source problem statement identifies these as requirements for later design a
 
 These are project/domain assumptions or decisions where the problem statement is silent; they are not represented as requirements found in the source.
 
-1. **Project Decision:** Trade Finance/LC is the single initial financial-sector use case, selected from the general financial-sector scope.
+1. **Project Decision:** The assistant's overall scope is financial-sector requirements engineering across multiple financial-service domains. Trade Finance/LC is one representative supported domain, not the exclusive scope.
 2. **Domain Assumption:** The example parties may include importer/applicant, issuing bank, exporter/beneficiary, and advising/confirming bank where applicable, alongside operational and control stakeholders.
 3. **Domain Assumption:** The illustrative LC workflow in Section 8 is representative only; actual responsibilities and sequences require stakeholder confirmation.
-4. The assistant supports a software project about LC-related operations; it does not itself process LCs or transactions.
+4. Domain-specific requirements and workflows depend on the target financial-service project. The assistant does not itself execute financial operations, including LC or other transactions.
 5. Authorised humans and project owners will identify jurisdiction, applicable sources, organizational policies, and the approval roles for a particular project. No jurisdiction or regulation is selected in this Phase-1 definition.
 6. The project will use existing models/services or other permitted mechanisms rather than train a custom foundation LLM; the source describes a practical LLM stack but does not require a specific model or vendor.
 7. Evaluation data will be real only where authorised, otherwise carefully anonymised or representative case studies will be used, consistent with the source’s evaluation description.
-8. “Production readiness” is a human approval checkpoint to be represented in the requirements workflow; this project does not deploy the target LC system.
+8. “Production readiness” is a human approval checkpoint to be represented in the requirements workflow; this project does not deploy the target financial-service system.
 
 ## 17. Constraints and Evaluation
 
@@ -260,7 +260,7 @@ These are project/domain assumptions or decisions where the problem statement is
 
 ### Evaluation considerations for the complete project
 
-Evaluate on representative financial-sector case studies, preferably including the selected LC context where suitable. Compare with conventional requirements engineering practices. The source lists requirement extraction precision/recall/F1, completeness, correctness, consistency, ambiguity and conflict detection, regulatory-control coverage, hallucination rate, citation correctness, SDLC recommendation suitability/accuracy, traceability coverage, human correction rate, processing time/time saved, and stakeholder satisfaction. The project must define datasets, baselines, scoring procedures, and acceptance thresholds in a later phase; this document does not invent numeric targets.
+Evaluate on representative financial-sector case studies across relevant financial-service domains; Trade Finance/LC may be one representative case where suitable. Compare with conventional requirements engineering practices. The source lists requirement extraction precision/recall/F1, completeness, correctness, consistency, ambiguity and conflict detection, regulatory-control coverage, hallucination rate, citation correctness, SDLC recommendation suitability/accuracy, traceability coverage, human correction rate, processing time/time saved, and stakeholder satisfaction. The project must define datasets, baselines, scoring procedures, and acceptance thresholds in a later phase; this document does not invent numeric targets.
 
 ## 18. Phase-1 Acceptance Criteria
 
@@ -270,7 +270,7 @@ Evaluate on representative financial-sector case studies, preferably including t
 - [x] Main and supporting objectives are defined.
 - [x] In-scope functionality is defined.
 - [x] Out-of-scope functionality is defined.
-- [x] Trade Finance / Letter-of-Credit domain is defined.
+- [x] Financial-sector-wide, multi-domain scope is defined; Trade Finance/LC is identified as one representative domain.
 - [x] Domain assumptions are explicitly identified.
 - [x] Domain workflow is defined.
 - [x] Our AI requirements-engineering workflow is clearly separated from the LC business workflow.
@@ -293,7 +293,7 @@ Section references below use the numbered topic headings in the supplied `Proble
 |---|---|---|
 | Problem: manual financial requirements work is slow and prone to ambiguity, inconsistency, omissions, alignment problems, delays, and rework | Problem Statement / system description | Summarised in Section 2 as the motivation for assistance |
 | Build an agentic AI/LLM system for requirements gathering, analysis, and SDLC identification | Problem Statement / system description | Main objective and scope define the assistant and its advisory boundary |
-| Select Trade Finance / LC for the initial project use case | **Project Decision**; DOCX Sections 1 and 18 allow a selected/initial financial use case but do not name LC | LC is the selected context; LC-specific process and actors are explicitly assumptions |
+| Establish financial-sector-wide requirements engineering with domain-aware support for multiple financial services; retain Trade Finance / LC as a representative domain | **Project Decision**; DOCX identifies the broader financial-sector problem and possible domains | The architecture is domain-general and extensible; domain-specific requirements and workflows depend on the target project; LC process and actors remain explicit assumptions |
 | Support interaction, extraction, clarification, issue detection, classification, and structured outputs | Problem Statement / system description; Sections 2, 7–10 | Scope, workflow, inputs, outputs, and actors cover those functions |
 | Classify business, technical, security, privacy, compliance, performance, availability, auditability, and operational requirements | Problem Statement / system description | Multi-label classifications are in Sections 4 and 12 |
 | Map to applicable regulations, policies, risk controls, and legacy constraints with evidence and human approval | Problem Statement / system description; Sections 5, 11 | Advisory evidence-grounded mapping and source metadata are included; humans decide interpretations |
@@ -307,7 +307,7 @@ Section references below use the numbered topic headings in the supplied `Proble
 | Define specialised agent responsibilities and central orchestration | Section 4, “Design the multi-agent architecture” | Workflow records logical agent roles and orchestrator without implementing agents |
 | Use authorised, versioned knowledge with source, jurisdiction, effective date, version, applicability | Section 5, “Build the financial knowledge base” | Knowledge input metadata and trust boundary specify these fields |
 | Retrieve evidence, cite it, score confidence, escalate unsupported/low-confidence output | Section 6, “Implement retrieval-grounded generation” | Workflow, outputs, and human review rules include evidence and escalation |
-| Ask about business, users, workflows, rules, exceptions, data, security, audit, performance, integration, constraints, schedule, and budget | Section 7, “Design requirement-gathering conversations” | Captured through stakeholder inputs and SDLC/project factors; detailed LC-specific questions await elicitation |
+| Ask about business, users, workflows, rules, exceptions, data, security, audit, performance, integration, constraints, schedule, and budget | Section 7, “Design requirement-gathering conversations” | Captured through stakeholder inputs and SDLC/project factors; domain-specific questions depend on the target financial-service project |
 | Preserve structured requirement fields and multi-label categories | Sections 8 and 9, “Extract and structure requirements” / “Classify the requirements” | Structured requirement output and classification scope include source, rationale, priority, dependencies, assumptions, criteria, risk, confidence, and approval |
 | Analyse ambiguity, incompleteness, inconsistency, duplication, feasibility, testability, source, terminology, stakeholder conflict, and missing controls | Section 10, “Analyse requirement quality” | Included in quality analysis and clarification loop |
 | Compliance analysis covers applicability, controls, evidence, gaps, approvals/audit, and retention/reporting; no final legal determination | Section 11, “Perform compliance and security analysis” | Advisory mappings and explicit compliance/legal approval boundary |
@@ -316,12 +316,12 @@ Section references below use the numbered topic headings in the supplied `Proble
 | Tailor workflow with phases, roles, deliverables, tests, controls, gates, criteria, and traceability | Section 15, “Generate a project-specific SDLC workflow” | Included as project-specific workflow output |
 | Mandatory approval points and accept/reject/modify/regenerate functions | Section 16, “Implement human-in-the-loop controls” | Listed in Section 14 with accountable approvers |
 | RBAC, MFA, encryption, masking, filtering, agent permissions, source allowlisting, injection defense, isolation, audit, retention, versioning, least privilege | Section 17, “Secure the Agentic AI platform” | Enumerated as later-phase requirements in Section 15 |
-| Prototype technology stack and begin with one use case before expansion | Sections 18, “Develop the prototype” | Initial LC use case is a project decision; no specific stack is selected or implemented in Phase 1 |
+| Prototype and extend domain-aware support for financial-service projects | Sections 18, “Develop the prototype” | Overall scope is financial-sector-wide; Trade Finance/LC is a representative example, and the architecture is extensible; no specific stack is selected or implemented in Phase 1 |
 | Evaluation metrics and comparison with experienced practitioners/conventional practice | Section 19, “Test and evaluate the system” | Evaluation considerations recorded; numerical targets deferred |
-| Advisory rollout, monitoring, updates, reassessment, and audit records | Section 20, “Deploy, monitor and improve” | Auditability, versioning, evaluation, and advisory boundary included; deployment of an LC system is out of scope |
+| Advisory rollout, monitoring, updates, reassessment, and audit records | Section 20, “Deploy, monitor and improve” | Auditability, versioning, evaluation, and advisory boundary included; deployment of a target financial-service system is out of scope |
 | Assistant must not replace human responsibility for regulatory interpretation, requirement approval, and SDLC adoption | Final paragraph after Section 20 | Explicitly stated in problem statement, boundary, and human approval sections |
 | Distinguish LC workflow participants/steps from assistant responsibilities | **Project Decision** derived from the user’s phase brief; DOCX does not describe an LC process | Sections 7–9 mark the LC context as assumed and separate the domain flow from the assistant workflow |
 
 ## 20. Phase-1 Validation
 
-This document was reviewed against the complete extracted text of the supplied DOCX and the Phase-1 request. It covers the source’s scope, stakeholder, input, agent, knowledge, retrieval, elicitation, requirement structure/classification/quality, compliance/security, artefact, SDLC, human-approval, security, prototype boundary, evaluation, and monitoring topics. The selected LC domain is consistently identified as a project decision; its illustrative process is labeled an assumption. No specific regulation, jurisdiction, or binding banking procedure is asserted. The AI is described as advisory, with mandatory human decisions at the identified gates. Phase 1 creates documentation only; no application implementation was started.
+This document was reviewed against the complete extracted text of the supplied DOCX and the Phase-1 request. It covers the source’s scope, stakeholder, input, agent, knowledge, retrieval, elicitation, requirement structure/classification/quality, compliance/security, artefact, SDLC, human-approval, security, prototype boundary, evaluation, and monitoring topics. The financial-sector-wide scope and domain-general, extensible architecture are explicit; Trade Finance/LC is one representative domain, and its illustrative process is labeled an assumption. No specific regulation, jurisdiction, or binding banking procedure is asserted. The AI is described as advisory, with mandatory human decisions at the identified gates. Phase 1 creates documentation only; no application implementation was started.

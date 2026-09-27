@@ -15,6 +15,7 @@ coverage/
 database/data/
 pgdata/
 storage/uploads/
+storage/knowledge/
 
 # Editor/OS files
 .DS_Store

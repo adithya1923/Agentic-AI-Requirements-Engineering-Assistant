@@ -43,4 +43,8 @@ export const api = {
   }),
   input: (id) => request(`/inputs/${encodeURIComponent(id)}`),
   inputContent: (id) => request(`/inputs/${encodeURIComponent(id)}/content`),
+  knowledgeDocuments: () => request('/knowledge/documents'),
+  knowledgeDocument: (id) => request(`/knowledge/documents/${encodeURIComponent(id)}/chunks`),
+  uploadKnowledgeDocument: (formData) => request('/knowledge/documents', { method: 'POST', body: formData }),
+  searchKnowledge: (body) => request('/knowledge/search', { method: 'POST', body: JSON.stringify(body) }),
 };
