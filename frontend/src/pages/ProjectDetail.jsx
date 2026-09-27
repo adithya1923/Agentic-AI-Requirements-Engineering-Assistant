@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import StatusPill from '../components/StatusPill.jsx';
 import { api } from '../api.js';
+import ProjectInputs from '../components/ProjectInputs.jsx';
 
 export default function ProjectDetail() {
   const { projectId } = useParams();
@@ -28,6 +29,7 @@ export default function ProjectDetail() {
         <article className="detail-card"><span className="eyebrow">CREATED</span><h2>{new Date(project.createdAt).toLocaleDateString()}</h2><p>Last updated {new Date(project.updatedAt).toLocaleDateString()}</p></article>
       </div>
       <div className="advisory-note"><span className="note-icon">i</span><p><strong>Foundation only.</strong> AI-assisted analysis, requirements generation, and compliance recommendations are planned for later phases.</p></div>
+      <ProjectInputs projectId={projectId} />
     </section>
   );
 }

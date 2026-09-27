@@ -5,6 +5,7 @@ import ProjectForm from './components/ProjectForm.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Projects from './pages/Projects.jsx';
 import ProjectDetail from './pages/ProjectDetail.jsx';
+import InputDetail from './pages/InputDetail.jsx';
 
 function App() {
   const [projects, setProjects] = useState([]);
@@ -56,6 +57,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard projects={projects} loading={loading} error={error} onCreate={() => setFormOpen(true)} />} />
           <Route path="/projects" element={<Projects projects={projects} loading={loading} error={error} onCreate={() => setFormOpen(true)} />} />
+          <Route path="/projects/:projectId/inputs/:inputId" element={<InputDetail />} />
           <Route path="/projects/:projectId" element={<ProjectDetail />} />
           <Route path="*" element={<section className="page-section"><h1>Page not found</h1><Link to="/">Return to overview</Link></section>} />
         </Routes>

@@ -14,6 +14,7 @@ coverage/
 *.log
 database/data/
 pgdata/
+storage/uploads/
 
 # Editor/OS files
 .DS_Store

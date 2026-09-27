@@ -1,6 +1,6 @@
-# Agentic AI Requirements Engineering Assistant for Trade Finance and Letters of Credit
+# Requirements Engineering Assistant for Trade Finance and Letters of Credit
 
-Phase 2 provides the application foundation for the project defined in [Phase 1](docs/phase-1-use-case-definition.md). It gives a team a place to create and retrieve requirements-engineering project records for the selected Trade Finance / Letter of Credit domain. It does not process LCs or banking transactions and contains no AI analysis functionality yet.
+Phase 3 builds on the application foundation for the project defined in [Phase 1](docs/phase-1-use-case-definition.md). It lets a team create projects and collect source text and documents for the selected Trade Finance / Letter of Credit domain. Document processing extracts text only; it does not interpret requirements. It does not process LCs or banking transactions and contains no AI analysis functionality.
 
 ## Architecture
 
@@ -34,11 +34,12 @@ backend/
     db/pool.js             # PostgreSQL pool
     middleware/            # centralized error responses
     routes/                # health, projects, and users APIs
-  test/api.test.js         # API health and request validation tests
-database/schema.sql        # users and projects tables plus initial LC project
+  test/                    # API, project, and input processing tests
+database/schema.sql        # users, projects, inputs, and initial LC project
 docs/
   phase-1-use-case-definition.md
   phase-2-application-foundation.md
+  phase-3-input-document-processing.md
 frontend/
   src/                     # React app, pages, components, API client, styles
   vite.config.js
@@ -111,6 +112,8 @@ No local PostgreSQL installation is required. Packages are installed independent
 
 Vite reads `frontend/.env.local`. Only `VITE_` variables are exposed to browser code; never put secrets in such variables.
 
+Uploaded files are stored under `storage/uploads` (ignored by Git) with generated storage names. Defaults are 10 MiB per file, 100,000 characters per text input, 1,000,000 extracted characters, and 200 PDF pages. These limits can be changed with `UPLOAD_STORAGE_DIR`, `MAX_UPLOAD_BYTES`, `MAX_INPUT_CHARS`, `MAX_EXTRACTED_CHARS`, and `MAX_PDF_PAGES`. Extraction is deterministic text extraction; scanned-image OCR and semantic analysis are not implemented. See [Phase 3 documentation](docs/phase-3-input-document-processing.md) for lifecycle, verification, and limitations.
+
 ## API endpoints
 
 All endpoints are under `/api` and return JSON.
@@ -122,6 +125,11 @@ All endpoints are under `/api` and return JSON.
 | `GET` | `/api/projects` | List projects |
 | `GET` | `/api/projects/:id` | Retrieve a project by UUID |
 | `POST` | `/api/projects` | Create a project (`name`, optional `description`, `selectedDomain`, `ownerId`) |
+| `POST` | `/api/projects/:projectId/inputs` | Add project text (`title`, `source`, `inputType`, `content`) |
+| `POST` | `/api/projects/:projectId/inputs/documents` | Upload a PDF, DOCX, or TXT document (multipart `file`, `title`, `source`) |
+| `GET` | `/api/projects/:projectId/inputs` | List inputs attached to a project |
+| `GET` | `/api/inputs/:id` | Retrieve input metadata and processing status |
+| `GET` | `/api/inputs/:id/content` | Retrieve submitted or extracted text |
 | `GET` | `/api/users` | List development user/role records |
 | `POST` | `/api/users` | Create a development user/role record (`displayName`, `email`, optional `role`) |
 
