@@ -45,7 +45,7 @@ function outputWithTemporaryKeys(request, temporaryKeys) {
 }
 
 function requirementOnlyOutputFor(request) { return JSON.stringify({requirements:JSON.parse(outputFor(request)).requirements}); }
-function analysisOnlyOutputFor(request) { const {requirements,...analysis}=JSON.parse(outputFor(request)); return JSON.stringify(analysis); }
+function analysisOnlyOutputFor(request) { const output=JSON.parse(outputFor(request)); const requirementTextByKey=new Map(output.requirements.map((requirement)=>[requirement.key,requirement.requirementText])); output.findings=output.findings.map(({requirementIds,...finding})=>({...finding,requirementReferences:requirementIds.map((key)=>({key,requirementText:requirementTextByKey.get(key)}))})); const {requirements,...analysis}=output; return JSON.stringify(analysis); }
 function requirementOnlyOutputWithTemporaryKeys(request,temporaryKeys) { const output=JSON.parse(outputFor(request)); output.requirements.forEach((requirement,index)=>{requirement.key=temporaryKeys[index];}); return JSON.stringify({requirements:output.requirements}); }
 
 function runWithCitationMapping(mapping) {
@@ -55,7 +55,7 @@ function runWithCitationMapping(mapping) {
   };
   const generateOutput=async(request)=>{
     if(request.responseSchema.required.includes('requirements'))return requirementOnlyOutputFor(request);
-    const {requirements,...analysis}=JSON.parse(outputFor(request));
+    const analysis=JSON.parse(analysisOnlyOutputFor(request));
     analysis.complianceMappings=[mapping];
     return JSON.stringify(analysis);
   };
@@ -95,7 +95,7 @@ test('two structured calls extract and analyze requirements with persisted IDs, 
   assert.ok(extractionRequest.responseSchema.properties.requirements); assert.equal(extractionRequest.ollamaFormat,undefined);
   assert.deepEqual(analysisRequest.responseSchema.required,['findings','securityPrivacy','risks','complianceMappings']);
   const findingSchema=analysisRequest.responseSchema.properties.findings.items;
-  assert.ok(findingSchema.properties.requirementIds); assert.equal(Object.hasOwn(findingSchema.properties,'evidence'),false);
+  assert.ok(findingSchema.properties.requirementReferences); assert.equal(findingSchema.properties.requirementIds,undefined); assert.equal(Object.hasOwn(findingSchema.properties,'evidence'),false);
   assert.deepEqual(findingSchema.required.includes('evidence'),false);
   const mappingSchema=analysisRequest.responseSchema.properties.complianceMappings.items.properties;
   assert.equal(mappingSchema.knowledgeChunkId.type,'string'); assert.equal(mappingSchema.knowledgeChunkId.minLength,1);
@@ -105,12 +105,13 @@ test('two structured calls extract and analyze requirements with persisted IDs, 
   assert.ok(extractionRequest.systemPrompt.includes("Set priority to HIGH, MEDIUM, or LOW only when that exact word is present in its sourceEvidence; otherwise use null or UNKNOWN."));
   for(const scaleText of ['decimal JSON number from 0.0 to 1.0','NEVER a percentage','100% = 1.0','90% = 0.9','75% = 0.75','0.0, 0.5, 0.85, 0.95, 1.0','50, 75, 90, 100']) assert.ok(extractionRequest.systemPrompt.includes(scaleText));
   assert.match(extractionRequest.responseSchema.properties.requirements.items.properties.confidence.description,/decimal number from 0\.0 to 1\.0, never a percentage/i);
-  for(const instruction of ['Actively identify source-supported requirements-engineering issues','For every requirement, check ambiguity, incompleteness, vague or unmeasurable wording, lack of testability, inconsistency/conflict, missing security controls, missing privacy controls, missing constraints, undefined terminology, and clarification needs.','Return findings: [] ONLY when the supplied requirements and source contain no source-supported issue that can reasonably be identified.','"fast" or "quickly" without a measurable threshold is a quality/testability finding','"appropriate period" without a duration is an incompleteness/clarification finding','"authenticate securely" without specified controls is a security/clarification finding','"easy to use" is a quality/testability finding','requirementIds must reference only actual canonical new requirement IDs','do not provide finding evidence quotes because the backend attaches the authoritative sourceEvidence','backend also attaches authoritative evidence to security/privacy observations and risks','source evidence attached to findings, security/privacy observations, and risks comes from the corresponding requirement\'s validated sourceEvidence','compliance knowledge evidence must come from the supplied retrievedKnowledge text','select only the knowledgeChunkId of a supplied retrievedKnowledge entry','Do not provide evidenceQuote; the backend attaches the corresponding retrievedKnowledge text','return no compliance mapping instead of guessing']) assert.ok(analysisRequest.systemPrompt.includes(instruction),instruction);
+  for(const instruction of ['Actively identify source-supported requirements-engineering issues','Analyze each requirement independently before creating findings.','Every finding must reference only the requirement whose text directly supports that finding','For a finding about one requirement, include exactly that one reference.','Use multiple requirement references ONLY when the finding genuinely concerns a relationship, inconsistency, or conflict between those requirements.','copy both the key and requirementText together from the same supplied requirements or existingRequirements entry','key/text pair must match exactly','Actively check ambiguity, incompleteness, vague or unmeasurable wording, lack of testability, inconsistency/conflict, missing security controls, missing privacy controls, missing constraints, undefined terminology, and clarification needs.','Return findings: [] ONLY when the supplied requirements and source contain no source-supported issue that can reasonably be identified.','"fast" or "quickly" without a measurable threshold is a quality/testability finding','"appropriate period" without a duration is an incompleteness/clarification finding','"authenticate securely" without specified controls is a security/clarification finding','"easy to use" is a quality/testability finding','Do not provide finding evidence quotes because the backend attaches authoritative sourceEvidence','backend also attaches authoritative evidence to security/privacy observations and risks','source evidence attached to findings, security/privacy observations, and risks comes from the corresponding requirement\'s validated sourceEvidence','compliance knowledge evidence must come from the supplied retrievedKnowledge text','select only the knowledgeChunkId of a supplied retrievedKnowledge entry','Do not provide evidenceQuote; the backend attaches the corresponding retrievedKnowledge text','return no compliance mapping instead of guessing']) assert.ok(analysisRequest.systemPrompt.includes(instruction),instruction);
   const analysisContext=JSON.parse(analysisRequest.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
   assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.key),['N1','N2','N3','N4','N5']);
   assert.ok(analysisContext.input.text.includes('two managers have approved it'));
   assert.ok(data.requirements.every((r)=>r.id&&r.sourceInputId===inputId&&r.confidence>=0&&r.confidence<=1&&source.slice(r.sourceEvidenceStart,r.sourceEvidenceEnd)===r.sourceEvidence));
   const conflict=data.findings.find((f)=>f.findingType==='CONFLICT'); assert.equal(conflict.requirementIds.length,2); assert.ok(conflict.requirementIds.every((id)=>data.requirements.some((r)=>r.id===id)));
+  const singleRequirementFinding=data.findings.find((finding)=>finding.findingType==='AMBIGUITY'); assert.equal(singleRequirementFinding.requirementIds.length,1); assert.equal(singleRequirementFinding.requirementIds[0],data.requirements[2].id);
   assert.deepEqual(conflict.evidence,conflict.requirementIds.map((requirementId)=>({requirementId,quote:data.requirements.find((requirement)=>requirement.id===requirementId).sourceEvidence})));
   assert.equal(data.analysis.summary.clarificationQuestions.length,3);
   for(const type of ['AMBIGUITY','INCOMPLETENESS','QUALITY','CONSISTENCY','CONFLICT','CLASSIFICATION']) assert.ok(data.analysis.summary.findingsByType[type]>=1);
@@ -160,6 +161,8 @@ test('preserves finding references to existing requirement UUIDs during key rema
   const quality=generated.findings.find((finding)=>finding.findingType==='QUALITY');
   quality.requirementIds=[existingId,'N5'];
   quality.evidence=[{requirementId:'N5',quote:'MODEL-FABRICATED-EVIDENCE-MUST-BE-IGNORED'}];
+  const requirementTextByKey=new Map(generated.requirements.map((requirement)=>[requirement.key,requirement.requirementText])); requirementTextByKey.set(existingId,existingEvidence);
+  generated.findings=generated.findings.map(({requirementIds,...finding})=>({...finding,requirementReferences:requirementIds.map((key)=>({key,requirementText:requirementTextByKey.get(key)}))}));
   const {requirements,...analysis}=generated;
   nextRawOutput=JSON.stringify(analysis); nextRawStage='analysis';
   try {
@@ -194,8 +197,10 @@ test('rejects compliance mappings with an unknown knowledgeChunkId',async()=>{
 
 test('Call 2 rejects finding references that do not identify canonical or existing requirements',async()=>{
   const rejected=JSON.parse(outputFor({userPrompt:`<context>${JSON.stringify({retrievedKnowledge:[]})}</context>`}));
+  const requirementTextByKey=new Map(rejected.requirements.map((requirement)=>[requirement.key,requirement.requirementText]));
+  rejected.findings=rejected.findings.map(({requirementIds,...finding})=>({...finding,requirementReferences:requirementIds.map((key)=>({key,requirementText:requirementTextByKey.get(key)}))}));
   const {requirements,...analysis}=rejected;
-  analysis.findings[0].requirementIds[0]='temporary-llm-key';
+  analysis.findings[0].requirementReferences[0].key='temporary-llm-key';
   nextRawOutput=JSON.stringify(analysis); nextRawStage='analysis'; calls=0;
   try {
     const response=await run();
@@ -203,6 +208,18 @@ test('Call 2 rejects finding references that do not identify canonical or existi
     assert.equal((await response.json()).error.code,'INVALID_ANALYSIS_OUTPUT');
   } finally { nextRawOutput=null; nextRawStage='analysis'; }
   assert.equal(calls,2,'Call 2 reference validation follows successful canonicalization in Call 1');
+});
+
+test('Call 2 rejects a known requirement key paired with another requirement text',async()=>{
+  const rejected=JSON.parse(outputFor({userPrompt:`<context>${JSON.stringify({retrievedKnowledge:[]})}</context>`}));
+  const requirementTextByKey=new Map(rejected.requirements.map((requirement)=>[requirement.key,requirement.requirementText]));
+  rejected.findings=rejected.findings.map(({requirementIds,...finding})=>({...finding,requirementReferences:requirementIds.map((key)=>({key,requirementText:requirementTextByKey.get(key)}))}));
+  const {requirements,...analysis}=rejected;
+  const retention=analysis.findings.find((finding)=>finding.title==='Retention period is missing');
+  retention.requirementReferences[0].requirementText='Users should authenticate securely.';
+  nextRawOutput=JSON.stringify(analysis); nextRawStage='analysis';
+  try { const response=await run(); assert.equal(response.status,502); assert.equal((await response.json()).error.code,'INVALID_ANALYSIS_OUTPUT'); }
+  finally { nextRawOutput=null; nextRawStage='analysis'; }
 });
 
 test('canonical key collision with a known requirement is still rejected',async()=>{
