@@ -8,6 +8,7 @@ import inputRoutes from './routes/inputs.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createKnowledgeRouter } from './routes/knowledge.js';
 import { createRequirementsRouter } from './routes/requirements.js';
+import { createRequirementAnalysisRouter } from './routes/requirement-analysis.js';
 
 export function createApp(options = {}) {
   const app = express();
@@ -20,6 +21,11 @@ export function createApp(options = {}) {
   app.use('/api', inputRoutes);
   app.use('/api/knowledge', createKnowledgeRouter(options));
   app.use('/api', createRequirementsRouter(options));
+  app.use('/api', createRequirementAnalysisRouter({
+    database: options.analysisDatabase || options.database || undefined,
+    generateOutput: options.generateOutput,
+    modelName: options.modelName,
+  }));
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

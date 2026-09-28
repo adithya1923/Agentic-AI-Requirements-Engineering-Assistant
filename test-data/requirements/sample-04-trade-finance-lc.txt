@@ -1,0 +1,5 @@
+The operations team would like customers to start a request for a letter of credit through a portal and attach the commercial documents they already have. Some requests arrive before all the documents are ready, so staff need to be able to see what has arrived and what is still outstanding.
+
+An operations user should be able to review a request, add an internal note, and return it to the customer when more information is needed. Customers want to see whether the request is new, under review, waiting for them, or finished. The team has not agreed who may mark a request finished or what must be checked first.
+
+Staff currently use a spreadsheet to keep track of changes. They want to know who changed a request and when. The portal should work for staff at different offices, but the expected load, response time, and retention period for old requests still need discussion. These notes describe a software project fixture and do not define an authoritative LC process or policy.

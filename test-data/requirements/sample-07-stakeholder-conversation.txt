@@ -1,0 +1,9 @@
+Product owner: Applicants tell us they start a loan request on the website, then leave to find their income details. They need to come back without entering everything again.
+
+Loan officer: If a document is missing, we usually contact the applicant. I would like the case page to show what we asked for and whether the applicant has replied. “Usually” is doing a lot of work here; the branches handle follow-up differently.
+
+Developer: Does the applicant edit the original application or send a message with the document?
+
+Product owner: I am not sure. We should ask operations. The review team also wants applications divided between officers, but we have not decided whether the division is by branch, product, or current workload.
+
+Loan officer: We need to see who last changed a case. Some of us want the case closed when a decision is entered; others say it should stay open until the applicant is notified. We should clarify that before we build the status flow.

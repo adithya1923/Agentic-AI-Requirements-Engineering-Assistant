@@ -84,9 +84,14 @@ CREATE TABLE IF NOT EXISTS candidate_requirements (
   assumptions TEXT[] NOT NULL DEFAULT '{}',
   extraction_status TEXT NOT NULL DEFAULT 'COMPLETED'
     CHECK (extraction_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')),
+  generation_provider TEXT NOT NULL DEFAULT 'unknown',
+  generation_model VARCHAR(120) NOT NULL DEFAULT 'unknown',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS generation_provider TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS generation_model VARCHAR(120) NOT NULL DEFAULT 'unknown';
 
 CREATE INDEX IF NOT EXISTS candidate_requirements_project_idx
   ON candidate_requirements (project_id, created_at DESC);
@@ -94,6 +99,52 @@ CREATE INDEX IF NOT EXISTS candidate_requirements_source_input_idx
   ON candidate_requirements (source_input_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS candidate_requirements_status_idx
   ON candidate_requirements (extraction_status);
+
+CREATE TABLE IF NOT EXISTS requirement_analysis_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  requirement_ids UUID[] NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL CHECK (status IN ('COMPLETED')),
+  provider TEXT NOT NULL DEFAULT 'ollama',
+  model_name VARCHAR(120) NOT NULL,
+  provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  requirement_count INTEGER NOT NULL CHECK (requirement_count >= 0),
+  finding_count INTEGER NOT NULL CHECK (finding_count >= 0),
+  summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE requirement_analysis_runs ADD COLUMN IF NOT EXISTS provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE requirement_analysis_runs DROP CONSTRAINT IF EXISTS requirement_analysis_runs_requirement_ids_check;
+ALTER TABLE requirement_analysis_runs DROP CONSTRAINT IF EXISTS requirement_analysis_runs_requirement_count_check;
+ALTER TABLE requirement_analysis_runs ADD CONSTRAINT requirement_analysis_runs_requirement_count_check CHECK (requirement_count >= 0);
+
+CREATE INDEX IF NOT EXISTS requirement_analysis_runs_project_idx
+  ON requirement_analysis_runs (project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS requirement_analysis_findings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  analysis_run_id UUID NOT NULL REFERENCES requirement_analysis_runs(id) ON DELETE CASCADE,
+  requirement_ids UUID[] NOT NULL CHECK (cardinality(requirement_ids) > 0),
+  agent_names TEXT[] NOT NULL CHECK (cardinality(agent_names) > 0),
+  finding_type TEXT NOT NULL CHECK (finding_type IN (
+    'AMBIGUITY', 'INCOMPLETENESS', 'QUALITY', 'CONSISTENCY', 'CONFLICT', 'CLASSIFICATION', 'CLARIFICATION'
+  )),
+  severity TEXT NOT NULL CHECK (severity IN ('INFO', 'LOW', 'MEDIUM', 'HIGH')),
+  title VARCHAR(180) NOT NULL CHECK (length(trim(title)) > 0),
+  description TEXT NOT NULL CHECK (length(trim(description)) > 0),
+  evidence JSONB NOT NULL CHECK (jsonb_typeof(evidence) = 'array'),
+  clarification_question TEXT,
+  confidence NUMERIC(4,3) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS requirement_analysis_findings_run_idx
+  ON requirement_analysis_findings (analysis_run_id, created_at, id);
+CREATE INDEX IF NOT EXISTS requirement_analysis_findings_type_severity_idx
+  ON requirement_analysis_findings (finding_type, severity);
+CREATE INDEX IF NOT EXISTS requirement_analysis_findings_requirement_ids_idx
+  ON requirement_analysis_findings USING GIN (requirement_ids);
 
 CREATE TABLE IF NOT EXISTS knowledge_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

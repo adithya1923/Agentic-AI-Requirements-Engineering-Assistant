@@ -19,6 +19,7 @@ const generationCalls = [];
 
 const sourceText = 'The portal shall show transaction status to the customer. Assume all timestamps use UTC. The service must retain the status history for 90 days with HIGH priority.';
 const requirement = (overrides = {}) => ({
+  key: 'N1',
   requirementText: 'The portal shall show transaction status to the customer.',
   requirementType: 'FUNCTIONAL',
   priority: null,
@@ -29,7 +30,23 @@ const requirement = (overrides = {}) => ({
 });
 
 function validResponse(requirements = [requirement()]) {
-  return JSON.stringify({ requirements });
+  return JSON.stringify({ requirements, findings: [], securityPrivacy: [], risks: [], complianceMappings: [] });
+}
+
+function outputForStage(output, request) {
+  let parsed;
+  try { parsed = JSON.parse(output); } catch { return output; }
+  const stage = request.responseSchema.required.includes('requirements') ? 'requirements' : 'analysis';
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return output;
+  if (stage === 'requirements') {
+    if (Object.keys(parsed).length !== 5 || !Array.isArray(parsed.requirements)) return output;
+    return JSON.stringify({ requirements: parsed.requirements });
+  }
+  const analysisKeys = ['findings', 'securityPrivacy', 'risks', 'complianceMappings'];
+  if (analysisKeys.every((key) => Array.isArray(parsed[key]))) {
+    return JSON.stringify(Object.fromEntries(analysisKeys.map((key) => [key, parsed[key]])));
+  }
+  return output;
 }
 
 async function createProject(name) {
@@ -57,10 +74,12 @@ async function extract(project, input) {
 
 before(async () => {
   const app = createApp({
-    generateOutput: async (request) => {
+    embedQuery: async () => Array(768).fill(0.01),
+    generateOutput: async (request, { onProviderUsed } = {}) => {
       generationCalls.push(request);
       if (nextProviderError) throw nextProviderError;
-      return nextOutput;
+      onProviderUsed?.({ provider: 'groq', model: 'test-groq-model' });
+      return outputForStage(nextOutput, request);
     },
   });
   server = app.listen(0, '127.0.0.1');
@@ -91,6 +110,7 @@ after(async () => {
 
 test('extracts structured candidates, persists evidence offsets, and exposes API traceability', async () => {
   nextOutput = validResponse([requirement(), requirement({
+    key: 'N2',
     requirementText: 'The service must retain the status history for 90 days.',
     requirementType: 'CONSTRAINT', priority: 'HIGH',
     sourceEvidence: 'The service must retain the status history for 90 days with HIGH priority.',
@@ -99,11 +119,15 @@ test('extracts structured candidates, persists evidence offsets, and exposes API
   const response = await extract(projectId, textInputId);
   assert.equal(response.status, 200);
   const body = (await response.json()).data;
+  assert.equal(body.provider, 'groq');
+  assert.equal(body.modelName, 'test-groq-model');
   assert.equal(body.sourceInput.id, textInputId);
   assert.equal(body.requirements.length, 2);
   assert.equal(body.requirements[0].projectId, projectId);
   assert.equal(body.requirements[0].sourceInputId, textInputId);
   assert.equal(body.requirements[0].extractionStatus, 'COMPLETED');
+  assert.equal(body.requirements[0].provider, 'groq');
+  assert.equal(body.requirements[0].modelName, 'test-groq-model');
   assert.equal(body.requirements[0].sourceEvidenceStart, sourceText.indexOf(body.requirements[0].sourceEvidence));
   assert.equal(body.requirements[0].sourceEvidenceEnd, body.requirements[0].sourceEvidenceStart + body.requirements[0].sourceEvidence.length);
   assert.equal(body.requirements[1].priority, 'HIGH');
@@ -144,10 +168,12 @@ test('uses Phase 3 extracted document text and includes financial project contex
   const response = await extract(projectId, documentInputId);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).data.sourceInput.inputType, 'DOCUMENT');
-  const call = generationCalls[previousCallCount];
-  assert.match(call.userPrompt, /A loan application shall show its review status\./);
-  assert.ok(call.responseSchema.properties.requirements);
-  assert.equal(call.modelPurpose, 'requirement-extraction');
+  const [extraction, analysis] = generationCalls.slice(previousCallCount);
+  assert.match(extraction.userPrompt, /A loan application shall show its review status\./);
+  assert.ok(extraction.responseSchema.properties.requirements);
+  assert.equal(extraction.modelPurpose, 'requirements-intelligence');
+  assert.deepEqual(analysis.responseSchema.required, ['findings', 'securityPrivacy', 'risks', 'complianceMappings']);
+  assert.equal(generationCalls.length, previousCallCount + 2);
 });
 
 test('a successful repeat replaces prior candidates for that input instead of duplicating them', async () => {
@@ -180,7 +206,7 @@ test('invalid JSON, type, confidence, and unsupported evidence fail safely witho
     nextOutput = output;
     const response = await extract(projectId, textInputId);
     assert.equal(response.status, 502);
-    assert.equal((await response.json()).error.code, 'INVALID_MODEL_OUTPUT');
+    assert.equal((await response.json()).error.code, 'INVALID_ANALYSIS_OUTPUT');
     const after = await (await fetch(`${baseUrl}/projects/${projectId}/requirements`)).json();
     assert.deepEqual(new Set(after.data.map((item) => item.id)), new Set(priorIds));
   }

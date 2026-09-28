@@ -51,5 +51,11 @@ export const api = {
   extractRequirements: (projectId, inputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/extract`, {
     method: 'POST', body: JSON.stringify({ inputId }),
   }),
+  runRequirementsIntelligence: (projectId, inputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/intelligence`, {
+    method: 'POST', body: JSON.stringify({ inputId }),
+  }),
   requirement: (id) => request(`/requirements/${encodeURIComponent(id)}`),
+  projectRequirementAnalysis: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analysis`),
+  analyzeRequirements: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analyze`, { method: 'POST' }),
+  requirementAnalysis: (id) => request(`/requirements/${encodeURIComponent(id)}/analysis`),
 };

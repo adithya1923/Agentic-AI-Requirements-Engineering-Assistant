@@ -1,6 +1,6 @@
 # Financial-Sector Requirements Engineering Assistant
 
-The project is a requirements engineering assistant for software across the financial sector, with a domain-aware architecture that can be extended across financial services. Trade Finance / Letter of Credit is one representative domain and the seeded project example; this does not claim complete domain knowledge or functionality for every service. Phase 4 provides project-independent, source-linked evidence retrieval. Phase 5 adds candidate requirement extraction from READY project inputs using a configurable local generative LLM. It does not perform requirement quality analysis, regulatory conclusions, or financial operations.
+The project is a requirements engineering assistant for financial services. Phase 4 provides project-independent source-linked retrieval. Agent 1, Requirements Intelligence, consolidates requirement extraction and analysis into one bounded structured generation request per selected READY input. It uses the shared provider layer and Phase 4 retrieval, preserves exact source evidence, and stores advisory findings, clarification questions, confidence, and citations. Security/privacy/risk/policy observations are not binding legal or regulatory conclusions. Agent 2 (SDLC and documentation) is planned for a later phase.
 
 ## Architecture
 
@@ -10,10 +10,12 @@ React + Vite frontend (127.0.0.1:5173)
         ▼
 Node.js + Express API (localhost:4000)
         ├── PostgreSQL + pgvector (localhost:5432)
-        └── Ollama local model APIs (localhost:11434; separate embedding and generation models)
+        ├── Shared LLM generation provider (Gemini → Groq → Ollama)
+        └── Ollama + EmbeddingGemma (separate embedding service)
+
 ```
 
-The frontend uses the API for application data. The API owns validation, extraction and database access. Ollama generates pretrained local text embeddings; pgvector stores and searches them alongside source-linked chunks. Financial-domain metadata supports filtering evidence within the shared knowledge base. The seeded example project is “Trade Finance / Letter of Credit Requirements Project”.
+The frontend uses the API for application data. The API owns validation, deterministic orchestration, and database access. The shared server-side generation provider supports Gemini through the official `@google/genai` SDK, Groq, and local Ollama. Requirements Intelligence pins each operation to the configured provider and makes one generation request; provider retry/fallback is disabled for this operation. Ollama `embeddinggemma` remains separate for Phase 4 embeddings and pgvector retrieval. The deterministic demo project is available through `npm run seed:demo`.
 
 ## Technology
 
@@ -28,20 +30,24 @@ The frontend uses the API for application data. The API owns validation, extract
 ```text
 backend/
   scripts/init-db.js       # repeatable schema initialization command
+  scripts/seed-demo.js     # idempotent PostgreSQL demo project and KB seed
   src/
     app.js                 # Express app, CORS, routes, error handling
     config.js              # environment configuration
     db/pool.js             # PostgreSQL pool
     middleware/            # centralized error responses
     routes/                # health, projects, inputs, users, knowledge, and requirements APIs
-  test/                    # API, project, input, knowledge-base, and extraction tests
+    services/              # unified requirements intelligence, shared generation, RAG and validation
+  test/                    # API, project, input, knowledge-base, extraction, and analysis tests
 database/schema.sql        # application tables and representative Trade Finance project
+test-data/requirements/    # synthetic project-input fixtures; not Knowledge Base sources
 docs/
   phase-1-use-case-definition.md
   phase-2-application-foundation.md
   phase-3-input-document-processing.md
   phase-4-knowledge-base-rag-foundation.md
   phase-5-llm-requirement-extraction.md
+  requirements-intelligence.md
 frontend/
   src/                     # React app, pages, components, API client, styles
   vite.config.js
@@ -125,6 +131,17 @@ No local PostgreSQL installation is required. Packages are installed independent
 | `OLLAMA_GENERATION_BASE_URL` | API | Ollama chat API base URL for requirement extraction (default `http://localhost:11434`) |
 | `OLLAMA_GENERATION_MODEL` | API | Generative model for Phase 5 (default `qwen2.5:3b`; install manually, never downloaded by the app) |
 | `OLLAMA_GENERATION_TIMEOUT_MS` | API | Generation request timeout (default `120000`) |
+| `LLM_GENERATION_PROVIDER` | API | Configured generation provider used by Requirements Intelligence (default `gemini`) |
+| `LLM_GENERATION_FALLBACKS` | API | Ordered comma-separated fallbacks (default `groq,ollama` for Gemini) |
+| `LLM_GENERATION_RETRY_ATTEMPTS` | API | Bounded attempts for transient failures (default `2`, maximum `3`) |
+| `LLM_GENERATION_RETRY_MAX_DELAY_MS` | API | Maximum retry delay (default `1500`, maximum `3000`) |
+| `LLM_PROVIDER_HEALTH_CACHE_MS` | API | Brief cache for failed provider health during adjacent requests (default `45000`, maximum `120000`) |
+| `GROQ_API_KEY` | API | Groq API key; keep it in the backend `.env`, never in frontend variables or source |
+| `GROQ_BASE_URL` | API | Groq OpenAI-compatible API base URL (default `https://api.groq.com/openai/v1`) |
+| `GROQ_MODEL` | API | Groq generation model (default `openai/gpt-oss-20b`) |
+| `GEMINI_API_KEY` | API | Gemini API key; keep it in the backend `.env`, never in frontend variables or source |
+| `GEMINI_MODEL` | API | Gemini generation model (default `gemini-3.8-flash`) |
+
 | `KB_DOCUMENT_EMBEDDING_PREFIX` | API | Document embedding task prefix/template |
 | `KB_QUERY_EMBEDDING_PREFIX` | API | Search query embedding task prefix/template |
 | `KB_UPLOAD_STORAGE_DIR` | API | Generated-name reference file storage directory |
@@ -146,7 +163,8 @@ All endpoints are under `/api` and return JSON.
 | `GET` | `/api/health/db` | Database connectivity status |
 | `GET` | `/api/projects` | List projects |
 | `GET` | `/api/projects/:id` | Retrieve a project by UUID |
-| `POST` | `/api/projects` | Create a project (`name`, optional `description`, `selectedDomain`, `ownerId`) |
+| `POST` | `/api/projects` | Create a project (
+ame`, optional `description`, `selectedDomain`, `ownerId`) |
 | `POST` | `/api/projects/:projectId/inputs` | Add project text (`title`, `source`, `inputType`, `content`) |
 | `POST` | `/api/projects/:projectId/inputs/documents` | Upload a PDF, DOCX, or TXT document (multipart `file`, `title`, `source`) |
 | `GET` | `/api/projects/:projectId/inputs` | List inputs attached to a project |
@@ -159,11 +177,14 @@ All endpoints are under `/api` and return JSON.
 | `GET` | `/api/knowledge/documents/:id` | Retrieve knowledge document metadata and extracted text |
 | `GET` | `/api/knowledge/documents/:id/chunks` | Retrieve ordered chunks with source-document metadata |
 | `POST` | `/api/knowledge/search` | Retrieve semantically relevant evidence chunks and source metadata |
-| `POST` | `/api/projects/:projectId/requirements/extract` | Extract candidates from a READY input (`inputId`) |
+| `POST` | `/api/projects/:projectId/requirements/intelligence` | Extract and analyze one READY input in one generation request (`inputId`) |
+| `POST` | `/api/projects/:projectId/requirements/extract` | Compatibility alias for the unified intelligence operation |
 | `GET` | `/api/projects/:projectId/requirements` | List candidate requirements for a project with source-input references |
 | `GET` | `/api/requirements/:id` | Retrieve one candidate with evidence and source-input metadata |
+| `GET` | `/api/projects/:projectId/requirements/analysis` | Retrieve the latest successful analysis and findings |
+| `GET` | `/api/requirements/:id/analysis` | Retrieve current analysis findings for one candidate |
 
-Knowledge document uploads require a `financialDomain` from the supported domain taxonomy. Search may include `filters.financialDomain` to restrict retrieval; without it, the shared knowledge base is searched across domains. See [Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md) for the supported values and API details. Phase 5 extraction uses `OLLAMA_GENERATION_MODEL`, separate from the Phase 4 embedding model; see [Phase 5 documentation](docs/phase-5-llm-requirement-extraction.md) for setup and behavior.
+Knowledge document uploads require a `financialDomain` from the supported domain taxonomy. Search may include `filters.financialDomain` to restrict retrieval; without it, the shared knowledge base is searched across domains. See [Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md). Gemini uses the official `@google/genai` SDK and structured JSON output. Each Requirements Intelligence operation uses the configured provider once; quota, overload, and timeout errors are provider-neutral. The demo KB corpus is labelled `DEMO / NON-AUTHORITATIVE`. See [Requirements Intelligence documentation](docs/requirements-intelligence.md).
 
 Supported project statuses are `DRAFT`, `ACTIVE`, and `ARCHIVED`. Supported role labels are `ADMIN`, `BUSINESS_STAKEHOLDER`, `REQUIREMENTS_ENGINEER`, `TECHNICAL_STAKEHOLDER`, `COMPLIANCE`, `SECURITY`, `RISK`, `PROJECT_MANAGER`, and `APPROVER`.
 
@@ -176,10 +197,10 @@ npm run build:frontend
 npm test --prefix backend
 ```
 
-With Docker running, the end-to-end check is: start Compose, run `npm run db:init`, start the API and frontend, verify `/api/health` and `/api/health/db`, create a project in the UI, and verify it appears in the project list and detail view after a reload. The database-backed flow requires Docker/PostgreSQL and cannot be replaced by static frontend data.
+With PostgreSQL running, initialize and seed the database with `npm run db:init` and `npm run seed:demo`, then start the API and frontend. Verify `/api/health` and `/api/health/db`, open the “Requirements Intelligence Financial Services Demo” project, choose a READY input, and run Requirements Intelligence. The seeded project and knowledge notes are real PostgreSQL records; the UI does not use static project mocks.
 
 Phase 4 setup and verification details are in [the Phase 4 documentation](docs/phase-4-knowledge-base-rag-foundation.md).
 
 ## Intentionally deferred
 
-This foundation does not include production authentication/authorization, MFA, autonomous agents, requirement quality/classification analysis, clarification, compliance/security/risk decisions, approval workflows, SRS/story/acceptance criteria generation, hallucination detection, SDLC recommendations, advanced audit, or deployment of a banking system. Phase 5 candidate extraction is source-based only and is not RAG-enabled analysis. User records and role labels are data-model foundations only; they do not enforce access control.
+This foundation does not include production authentication/authorization, MFA, autonomous planning or recursive agent spawning, approval workflows, SRS/story/acceptance-criteria generation, advanced audit, or deployment of a banking system. Requirements Intelligence provides advisory requirement extraction and analysis, including retrieval-grounded policy/security/privacy/risk observations; it does not make binding legal/regulatory decisions. Agent 2 SDLC recommendations and documentation are deferred. User records and role labels are data-model foundations only; they do not enforce access control.

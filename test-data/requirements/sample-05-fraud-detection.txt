@@ -1,0 +1,5 @@
+Our monitoring team receives alerts from several existing systems. Analysts want one queue where they can see an alert, its source system, the time it arrived, and the customer or account references provided with it. We do not yet know whether all source systems send the same fields.
+
+An analyst should be able to assign an alert to themselves, add investigation notes, and mark it as open, waiting for information, or resolved. A supervisor wants to see alerts that have not been picked up after a while, but the time limit and escalation behavior are not agreed.
+
+When an alert is updated, the team wants a record of the change and the user who made it. Some teams would like alerts grouped when they appear related, but no matching rules have been defined. The service should remain usable during a busy shift; the expected alert volume and acceptable delay need to be confirmed.

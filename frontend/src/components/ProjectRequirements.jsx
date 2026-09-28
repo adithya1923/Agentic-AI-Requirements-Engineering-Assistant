@@ -5,10 +5,14 @@ import { api } from '../api.js';
 function requestErrorMessage(error) {
   switch (error.payload?.error?.code) {
     case 'INPUT_NOT_READY': return 'Choose an input that has finished processing and reached READY.';
-    case 'LLM_PROVIDER_UNAVAILABLE': return 'The configured Ollama generation provider is unavailable. Check that Ollama is running and the configured generation model is installed.';
-    case 'LLM_PROVIDER_ERROR': return 'Ollama could not run the configured generation model. Verify the model name and that it is installed.';
-    case 'LLM_INVALID_RESPONSE': return 'Ollama returned an invalid generation response. No candidate requirements were changed.';
+    case 'LLM_PROVIDER_UNAVAILABLE': return error.message || 'The configured generation provider is unavailable.';
+    case 'LLM_PROVIDER_ERROR': return error.message || 'The configured generation provider could not complete the request.';
+    case 'LLM_RATE_LIMITED': return 'LLM provider quota exceeded. Please retry later.';
+    case 'LLM_ALL_PROVIDERS_FAILED': return 'LLM provider is temporarily unavailable.';
+    case 'LLM_INVALID_RESPONSE': return error.message || 'The configured generation provider returned an invalid response. No candidate requirements were changed.';
     case 'LLM_TIMEOUT': return 'Requirement extraction timed out. Try again or use a faster configured generation model.';
+    case 'INTELLIGENCE_INPUT_TOO_LARGE':
+    case 'INTELLIGENCE_CONTEXT_TOO_LARGE': return error.message;
     case 'INVALID_MODEL_OUTPUT': return 'The model response did not match the required structured format or source evidence. No candidate requirements were changed.';
     case 'SOURCE_INPUT_EMPTY': return 'This input has no extracted or submitted text to analyze.';
     case 'DATABASE_UNAVAILABLE': return 'The database is unavailable. Candidate requirements could not be loaded or saved.';
@@ -30,18 +34,23 @@ export default function ProjectRequirements({ projectId }) {
   const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [intelligence, setIntelligence] = useState(null);
+  const [findings, setFindings] = useState([]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [projectInputs, projectRequirements] = await Promise.all([
+      const [projectInputs, projectRequirements, savedAnalysis] = await Promise.all([
         api.projectInputs(projectId),
         api.projectRequirements(projectId),
+        api.projectRequirementAnalysis(projectId),
       ]);
       const readyInputs = projectInputs.filter((input) => input.processingStatus === 'READY');
       setInputs(readyInputs);
       setRequirements(projectRequirements);
+      setIntelligence(savedAnalysis.analysis);
+      setFindings(savedAnalysis.findings);
       setInputId((current) => readyInputs.some((input) => input.id === current) ? current : readyInputs[0]?.id || '');
     } catch (requestError) {
       setError(requestErrorMessage(requestError));
@@ -58,14 +67,11 @@ export default function ProjectRequirements({ projectId }) {
     setError('');
     setNotice('');
     try {
-      const result = await api.extractRequirements(projectId, inputId);
-      setRequirements((current) => [
-        ...current.filter((item) => item.sourceInputId !== inputId),
-        ...result.requirements,
-      ]);
-      setNotice(result.requirements.length
-        ? `Extracted ${result.requirements.length} candidate ${result.requirements.length === 1 ? 'requirement' : 'requirements'}.`
-        : 'Extraction completed. No candidate requirements were supported by this input.');
+      const result = await api.runRequirementsIntelligence(projectId, inputId);
+      setRequirements((current) => [...current.filter((item) => item.sourceInputId !== inputId), ...result.requirements]);
+      setIntelligence(result.analysis);
+      setFindings(result.findings);
+      setNotice(`Requirements Intelligence completed with ${result.analysis.provider} · ${result.analysis.modelName}. ${result.requirements.length} source-linked requirements saved.`);
     } catch (requestError) {
       setError(requestErrorMessage(requestError));
     } finally {
@@ -76,7 +82,7 @@ export default function ProjectRequirements({ projectId }) {
   return (
     <section className="requirements-section">
       <div className="input-section-heading">
-        <div><span className="eyebrow">PHASE 5 · CANDIDATE EXTRACTION</span><h2>Candidate requirements</h2><p>Extract source-supported candidates from a READY project input.</p></div>
+        <div><span className="eyebrow">AGENT 1 · REQUIREMENTS INTELLIGENCE</span><h2>Requirements Intelligence</h2><p>Extract and review requirements from a READY input in one bounded model request.</p></div>
       </div>
       <div className="requirements-extract-bar">
         {loading ? <span className="state-message">Loading READY inputs and candidate requirements…</span> : inputs.length ? <>
@@ -84,20 +90,31 @@ export default function ProjectRequirements({ projectId }) {
             {inputs.map((input) => <option key={input.id} value={input.id}>{input.title} · {input.source}</option>)}
           </select></label>
           <button className="button button-primary" type="button" onClick={extract} disabled={!inputId || extracting}>
-            {extracting ? 'Extracting…' : 'Extract Requirements'}
+            {extracting ? 'Running…' : 'Run Requirements Intelligence'}
           </button>
         </> : <p className="requirements-empty-input">No READY inputs are available. Add stakeholder text or upload a document above.</p>}
       </div>
-      <p className="requirements-boundary-note">Candidates are drafts from source material. Extraction confidence describes fidelity to the source; it is not a regulatory or compliance score.</p>
+      <p className="requirements-boundary-note">AI output is advisory. Confidence measures extraction/observation confidence, not regulatory compliance. Demo knowledge entries are non-authoritative.</p>
       {error && <p className="form-error requirements-error" role="alert">{error}</p>}
       {notice && <p className="requirements-notice" role="status">{notice}</p>}
-      {!loading && !error && requirements.length === 0 && <div className="input-empty"><strong>No candidate requirements yet</strong><span>Select a READY input and run extraction.</span></div>}
+      {!loading && !error && requirements.length === 0 && <div className="input-empty"><strong>No candidate requirements yet</strong><span>Select a READY input and run Requirements Intelligence.</span></div>}
+      {intelligence && <section className="analysis-section" aria-label="Requirements Intelligence results">
+        <h3>Analysis · {intelligence.requirementCount} requirements · {intelligence.findingCount} findings</h3>
+        {!!intelligence.summary.clarificationQuestions.length && <div className="analysis-questions"><h3>Clarification questions</h3><ul>{intelligence.summary.clarificationQuestions.map((item) => <li key={item.findingId}>{item.question}</li>)}</ul></div>}
+        {!!findings.length && <div className="analysis-findings">{findings.map((finding) => <article className="analysis-finding" key={finding.id}><header><div><span className="eyebrow">{humanize(finding.findingType)} · confidence {(finding.confidence * 100).toFixed(0)}%</span><h3>{finding.title}</h3></div><span className="analysis-severity">{humanize(finding.severity)}</span></header><p className="analysis-description">{finding.description}</p>{finding.evidence.map((evidence) => <blockquote className="requirement-evidence" key={`${evidence.requirementId}-${evidence.quote}`}><small>Requirement {evidence.requirementId}</small>{evidence.quote}</blockquote>)}{finding.clarificationQuestion && <p><strong>Question:</strong> {finding.clarificationQuestion}</p>}</article>)}</div>}
+        {intelligence.summary.intelligence && <>
+          <div className="analysis-counts"><span>Security/privacy: {intelligence.summary.intelligence.securityPrivacy.length}</span><span>Risks: {intelligence.summary.intelligence.risks.length}</span><span>Policy mappings: {intelligence.summary.intelligence.complianceMappings.length}</span><span>Retrieved knowledge sources: {intelligence.summary.intelligence.knowledgeEvidence.length || 'No supporting knowledge-base evidence found.'}</span></div>
+          {[...intelligence.summary.intelligence.securityPrivacy,...intelligence.summary.intelligence.risks].map((item,index)=><article className="analysis-finding" key={`${item.title}-${index}`}><header><div><span className="eyebrow">{humanize(item.category || 'RISK')} · confidence {(item.confidence*100).toFixed(0)}%</span><h3>{item.title}</h3></div></header><p className="analysis-description">{item.observation}</p>{item.evidenceQuote&&<blockquote className="requirement-evidence">{item.evidenceQuote}</blockquote>}</article>)}
+        </>}
+        {!!intelligence.summary.intelligence?.complianceMappings.length && <div className="analysis-findings">{intelligence.summary.intelligence.complianceMappings.map((mapping, index) => <article className="analysis-finding" key={index}><h3>{mapping.title}</h3><p>{mapping.observation}</p>{mapping.citation && <blockquote className="requirement-evidence"><strong>{mapping.citation.title}</strong> · {mapping.citation.source}<br />{mapping.evidenceQuote}</blockquote>}<small>Confidence {(mapping.confidence * 100).toFixed(0)}% · Demo/non-authoritative unless source metadata says otherwise</small></article>)}</div>}
+      </section>}
       {!!requirements.length && <div className="requirements-list">{requirements.map((requirement) => <article className="requirement-card" key={requirement.id}>
         <header><span className="eyebrow">{humanize(requirement.requirementType)}</span><span className="requirement-confidence">Extraction confidence · {(requirement.confidence * 100).toFixed(0)}%</span></header>
         <p className="requirement-text">{requirement.requirementText}</p>
         <dl className="requirement-metadata">
           <div><dt>Priority</dt><dd>{requirement.priority ? humanize(requirement.priority) : 'Not stated'}</dd></div>
           <div><dt>Extraction status</dt><dd>{humanize(requirement.extractionStatus)}</dd></div>
+          <div><dt>Provider / model</dt><dd>{requirement.provider} · {requirement.modelName}</dd></div>
           <div><dt>Source input</dt><dd><Link to={`/projects/${projectId}/inputs/${requirement.sourceInputId}`}>{requirement.sourceInput?.title || inputs.find((input) => input.id === requirement.sourceInputId)?.title || requirement.sourceInputId}</Link><small>{requirement.sourceInputId}</small></dd></div>
           <div><dt>Evidence location</dt><dd>Characters {requirement.sourceEvidenceStart}–{requirement.sourceEvidenceEnd}</dd></div>
         </dl>

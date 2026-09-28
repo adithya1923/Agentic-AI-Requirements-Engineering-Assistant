@@ -1,24 +1,33 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { createRequirementExtractionService, presentRequirement, RequirementExtractionError } from '../services/requirement-extraction.js';
+import { presentRequirement } from '../services/requirement-extraction.js';
+import { createRequirementAnalysisService } from '../services/requirement-analysis.js';
 
-export function createRequirementsRouter({ database = pool, generateOutput } = {}) {
+export function createRequirementsRouter({ database = pool, generateOutput, embedQuery } = {}) {
   const router = Router();
-  const extractForInput = createRequirementExtractionService({ database, ...(generateOutput ? { generateOutput } : {}) });
+  const runIntelligence = createRequirementAnalysisService({ database, ...(generateOutput ? { generateOutput } : {}), ...(embedQuery ? { embedQuery } : {}) });
 
   router.post('/projects/:projectId/requirements/extract', async (request, response, next) => {
     if (!isUuid(request.params.projectId)) return sendError(response, 400, 'Project ID must be a UUID.', 'VALIDATION_ERROR');
     const inputId = request.body?.inputId;
     if (!isUuid(inputId)) return sendError(response, 400, 'inputId must be a UUID.', 'VALIDATION_ERROR');
     try {
-      const result = await extractForInput(request.params.projectId, inputId);
+      const result = await runIntelligence(request.params.projectId, inputId);
       response.json({ data: result });
     } catch (error) {
-      if (error instanceof RequirementExtractionError || error?.status >= 400 && error?.status < 600) {
+      if (error?.status >= 400 && error?.status < 600) {
         return sendError(response, error.status, error.message, error.code || 'REQUIREMENT_EXTRACTION_FAILED');
       }
       next(error);
     }
+  });
+
+  // Legacy Phase 5 entry point now delegates to the same unified intelligence
+  // operation, so extraction no longer has a separate generation provider.
+  router.post('/projects/:projectId/requirements/intelligence', async (request, response) => {
+    if (!isUuid(request.params.projectId) || !isUuid(request.body?.inputId)) return sendError(response, 400, 'A valid project ID and inputId are required.', 'VALIDATION_ERROR');
+    try { response.json({ data: await runIntelligence(request.params.projectId, request.body.inputId) }); }
+    catch (error) { if (error?.status >= 400 && error.status < 600) return sendError(response, error.status, error.message, error.code || 'REQUIREMENT_INTELLIGENCE_FAILED'); return sendError(response, 503, 'The database operation for Requirements Intelligence failed.', 'DATABASE_ERROR'); }
   });
 
   router.get('/projects/:projectId/requirements', async (request, response, next) => {

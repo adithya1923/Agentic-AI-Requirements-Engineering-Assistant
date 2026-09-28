@@ -1,0 +1,5 @@
+Applicants should be able to begin a loan application online, save it, and return to it later. They provide contact details, requested amount, purpose, income information, and supporting documents. The product team has not confirmed whether every applicant needs to provide the same documents.
+
+Credit staff review applications that need a person to look at them. A reviewer should see the submitted information and record a decision with a short explanation. If the information is incomplete, the applicant needs to know what is missing. We have not settled whether the applicant can keep editing the rest of the form while waiting for that information.
+
+Applicants should be able to check the current application status. The branch team wants a way to see applications assigned to them, but assignment rules and reassignment when someone is away are still being discussed. The service should handle busy periods without losing an application, but the expected volume and recovery time have not been decided.

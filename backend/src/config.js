@@ -4,7 +4,10 @@ import dotenv from 'dotenv';
 
 const backendDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(backendDirectory, '../..');
-dotenv.config({ path: path.resolve(backendDirectory, '../../.env') });
+dotenv.config({ path: path.join(projectRoot, '.env') });
+const generationProvider = (process.env.LLM_GENERATION_PROVIDER || 'gemini').toLowerCase();
+const defaultFallbacks = generationProvider === 'gemini' ? 'groq,ollama'
+  : generationProvider === 'groq' ? 'ollama,gemini' : 'gemini,groq';
 
 export const config = {
   port: Number(process.env.API_PORT || 4000),
@@ -27,9 +30,19 @@ export const config = {
     maxSearchTopK: Number(process.env.KB_MAX_SEARCH_TOP_K || 20),
   },
   generation: {
+    provider: generationProvider,
+    fallbacks: (process.env.LLM_GENERATION_FALLBACKS ?? defaultFallbacks).split(',').map((value) => value.trim().toLowerCase()).filter(Boolean),
     ollamaBaseUrl: (process.env.OLLAMA_GENERATION_BASE_URL || 'http://localhost:11434').replace(/\/$/, ''),
     model: process.env.OLLAMA_GENERATION_MODEL || 'qwen2.5:3b',
+    geminiApiKey: process.env.GEMINI_API_KEY || '',
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+    groqApiKey: process.env.GROQ_API_KEY || '',
+    groqBaseUrl: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
+    groqModel: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
     timeoutMillis: Number(process.env.OLLAMA_GENERATION_TIMEOUT_MS || 120_000),
+    retryAttempts: Math.max(1, Math.min(3, Number(process.env.LLM_GENERATION_RETRY_ATTEMPTS || 2))),
+    retryMaxDelayMillis: Math.max(0, Math.min(3000, Number(process.env.LLM_GENERATION_RETRY_MAX_DELAY_MS || 1500))),
+    providerHealthCacheMillis: Math.max(0, Math.min(120_000, Number(process.env.LLM_PROVIDER_HEALTH_CACHE_MS || 45_000))),
   },
   database: {
     host: process.env.DATABASE_HOST || 'localhost',

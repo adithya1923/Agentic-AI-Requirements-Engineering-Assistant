@@ -1,0 +1,5 @@
+For the new payment service, a customer starts a transfer from a linked account and enters a destination account, amount, and a date. Some payments should need a second employee to check them, especially when the amount is large, though we still need to agree the threshold and which payment types it applies to.
+
+Customers need to see whether a payment is waiting, being processed, completed, or could not be completed. If a network call times out, the service should not create a second payment when the same request is sent again. The operations team wants to retry failed payments, but we have not decided whether every failure can be retried or how many attempts are allowed.
+
+At the end of each business day, finance staff compare payment records with the settlement file from the external provider. We need to know which fields must match and how staff should handle a record that is missing from one side. The customer should be notified when a payment is completed or cannot proceed.

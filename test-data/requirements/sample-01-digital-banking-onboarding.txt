@@ -1,0 +1,5 @@
+We want to replace the paper-heavy account opening process with something customers can start from the bank app or the website. People should be able to save an application and come back later, because they often need to find documents before finishing it.
+
+The customer will enter their personal and contact details, address, and the account they want. They should be able to upload an identity document and proof of address. Operations staff need a way to review cases when the automated identity check cannot finish. If something is missing, the customer should be told what to provide and be able to continue without starting over.
+
+The customer should receive updates when the application is submitted and when its review status changes. We expect a few thousand applications on a busy day, but we have not agreed what counts as a peak or how long the app can take to respond. The operations team would also like a record of important changes so they can understand what happened to a case.

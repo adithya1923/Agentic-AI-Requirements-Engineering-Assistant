@@ -1,0 +1,7 @@
+Branch and digital teams discussed how a customer transfer should be reviewed.
+
+One stakeholder said: “Payments above a large amount should be checked quickly by another authorized employee. For smaller payments, the system should use the appropriate review.” No one explained what “large,” “quickly,” or “appropriate” means.
+
+Another stakeholder said: “Every payment must always have a second employee approval before it goes out.” The first stakeholder replied that routine low-value transfers should not be held up. The group did not decide which rule to use or whether the rules apply to the same payment channels.
+
+The product owner also asked for a simple way to tell customers when a payment is complete. The service team asked what should happen when the external payment provider does not respond. The meeting ended before either question was resolved.

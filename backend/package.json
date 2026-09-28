@@ -7,9 +7,11 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "db:init": "node scripts/init-db.js",
+    "seed:demo": "node scripts/seed-demo.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@google/genai": "^2.24.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

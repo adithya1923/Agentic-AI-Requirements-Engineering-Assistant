@@ -1,0 +1,53 @@
+import { Router } from 'express';
+import { pool } from '../db/pool.js';
+import { loadCurrentProjectAnalysis } from '../services/requirement-analysis.js';
+import { RequirementAnalysisError } from '../services/analysis-validation.js';
+
+export function createRequirementAnalysisRouter({ database = pool, generateOutput, modelName } = {}) {
+  const router = Router();
+  router.get('/projects/:projectId/requirements/analysis', async (request, response) => {
+    if (!isUuid(request.params.projectId)) return sendError(response, 400, 'Project ID must be a UUID.', 'VALIDATION_ERROR');
+    try {
+      const result = await loadCurrentProjectAnalysis(database, request.params.projectId);
+      return response.json({ data: result });
+    } catch (error) {
+      return respondError(response, error);
+    }
+  });
+
+  router.get('/requirements/:id/analysis', async (request, response) => {
+    if (!isUuid(request.params.id)) return sendError(response, 400, 'Requirement ID must be a UUID.', 'VALIDATION_ERROR');
+    try {
+      const candidate = await database.query(
+        'SELECT id, project_id FROM candidate_requirements WHERE id=$1', [request.params.id],
+      );
+      if (!candidate.rowCount) return sendError(response, 404, 'Requirement not found.', 'REQUIREMENT_NOT_FOUND');
+      const result = await loadCurrentProjectAnalysis(database, candidate.rows[0].project_id);
+      return response.json({
+        data: {
+          analysis: result.analysis,
+          findings: result.findings.filter((finding) => finding.requirementIds.includes(request.params.id)),
+        },
+      });
+    } catch (error) {
+      return respondError(response, error);
+    }
+  });
+
+  return router;
+}
+
+function respondError(response, error) {
+  if (error instanceof RequirementAnalysisError || Number.isInteger(error?.status) && error.status >= 400 && error.status < 600) {
+    return sendError(response, error.status, error.message, error.code || 'REQUIREMENT_ANALYSIS_FAILED');
+  }
+  return sendError(response, 503, 'The database operation for requirement analysis failed.', 'DATABASE_ERROR');
+}
+
+function sendError(response, status, message, code) {
+  return response.status(status).json({ error: { message, code } });
+}
+
+function isUuid(value) {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
