@@ -47,7 +47,7 @@ export const api = {
   knowledgeDocument: (id) => request(`/knowledge/documents/${encodeURIComponent(id)}/chunks`),
   uploadKnowledgeDocument: (formData) => request('/knowledge/documents', { method: 'POST', body: formData }),
   searchKnowledge: (body) => request('/knowledge/search', { method: 'POST', body: JSON.stringify(body) }),
-  projectRequirements: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements`),
+  projectRequirements: (projectId, sourceInputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements${sourceInputId ? `?sourceInputId=${encodeURIComponent(sourceInputId)}` : ''}`),
   extractRequirements: (projectId, inputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/extract`, {
     method: 'POST', body: JSON.stringify({ inputId }),
   }),
@@ -55,7 +55,7 @@ export const api = {
     method: 'POST', body: JSON.stringify({ inputId }),
   }),
   requirement: (id) => request(`/requirements/${encodeURIComponent(id)}`),
-  projectRequirementAnalysis: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analysis`),
+  projectRequirementAnalysis: (projectId, sourceInputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analysis?sourceInputId=${encodeURIComponent(sourceInputId)}`),
   analyzeRequirements: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analyze`, { method: 'POST' }),
   requirementAnalysis: (id) => request(`/requirements/${encodeURIComponent(id)}/analysis`),
 };

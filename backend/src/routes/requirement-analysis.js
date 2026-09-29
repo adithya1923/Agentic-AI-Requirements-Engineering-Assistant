@@ -7,8 +7,9 @@ export function createRequirementAnalysisRouter({ database = pool, generateOutpu
   const router = Router();
   router.get('/projects/:projectId/requirements/analysis', async (request, response) => {
     if (!isUuid(request.params.projectId)) return sendError(response, 400, 'Project ID must be a UUID.', 'VALIDATION_ERROR');
+    if (!isUuid(request.query.sourceInputId)) return sendError(response,400,'A valid sourceInputId query parameter is required.','VALIDATION_ERROR');
     try {
-      const result = await loadCurrentProjectAnalysis(database, request.params.projectId);
+      const result = await loadCurrentProjectAnalysis(database, request.params.projectId, request.query.sourceInputId);
       return response.json({ data: result });
     } catch (error) {
       return respondError(response, error);
@@ -19,12 +20,13 @@ export function createRequirementAnalysisRouter({ database = pool, generateOutpu
     if (!isUuid(request.params.id)) return sendError(response, 400, 'Requirement ID must be a UUID.', 'VALIDATION_ERROR');
     try {
       const candidate = await database.query(
-        'SELECT id, project_id FROM candidate_requirements WHERE id=$1', [request.params.id],
+        'SELECT id, project_id, source_input_id FROM candidate_requirements WHERE id=$1', [request.params.id],
       );
       if (!candidate.rowCount) return sendError(response, 404, 'Requirement not found.', 'REQUIREMENT_NOT_FOUND');
-      const result = await loadCurrentProjectAnalysis(database, candidate.rows[0].project_id);
+      const result = await loadCurrentProjectAnalysis(database, candidate.rows[0].project_id, candidate.rows[0].source_input_id);
       return response.json({
         data: {
+          sourceInputId:candidate.rows[0].source_input_id,
           analysis: result.analysis,
           findings: result.findings.filter((finding) => finding.requirementIds.includes(request.params.id)),
         },

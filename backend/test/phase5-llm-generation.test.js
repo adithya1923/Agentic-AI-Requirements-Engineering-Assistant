@@ -36,7 +36,8 @@ test('Gemini uses the official SDK generateContent structured JSON API and the u
   assert.equal(captured.model, 'gemini-test');
   assert.equal(captured.contents[0].parts[0].text, request.userPrompt);
   assert.equal(captured.config.responseMimeType, 'application/json');
-  assert.deepEqual(captured.config.responseJsonSchema.properties.requirements.items.properties.requirementText, { type: 'string' });
+  assert.deepEqual(captured.config.responseJsonSchema.properties.requirements.items.properties.candidateId, { type: 'string' });
+  assert.equal(Object.hasOwn(captured.config.responseJsonSchema.properties.requirements.items.properties, 'requirementText'), false);
   assert.equal(captured.config.responseJsonSchema.additionalProperties, false);
   assert.deepEqual(used, { provider: 'gemini', model: 'gemini-test' });
 });

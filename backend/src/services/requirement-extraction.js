@@ -2,14 +2,15 @@
 // the unified Requirements Intelligence workflow.
 const requirementTypes = new Set(['FUNCTIONAL', 'NON_FUNCTIONAL', 'BUSINESS_RULE', 'CONSTRAINT', 'OTHER', 'UNKNOWN']);
 const priorities = new Set(['HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']);
+const MAX_CANDIDATES = 80;
+const MAX_CANDIDATE_CHARS = 2800;
 
 export const requirementResponseSchema = {
   type:'object', additionalProperties:false,
   properties:{ requirements:{ type:'array', maxItems:20, items:{ type:'object', additionalProperties:false, properties:{
-    requirementText:{type:'string',minLength:1,maxLength:3000}, requirementType:{type:'string',enum:[...requirementTypes]},
-    priority:{anyOf:[{type:'string',enum:[...priorities]},{type:'null'}]}, sourceEvidence:{type:'string',minLength:1,maxLength:10000},
-    confidence:{type:'number',minimum:0,maximum:1}, assumptions:{type:'array',maxItems:3,items:{type:'string',minLength:1,maxLength:1000}},
-  },required:['requirementText','requirementType','priority','sourceEvidence','confidence','assumptions']} } },
+    candidateId:{type:'string',minLength:1,maxLength:64}, requirementType:{type:'string',enum:[...requirementTypes]},
+    confidence:{type:'number',minimum:0,maximum:1},
+  },required:['candidateId','requirementType','confidence']} } },
   required:['requirements'],
 };
 
@@ -17,27 +18,81 @@ export class RequirementExtractionError extends Error {
   constructor(message,code,status=502){super(message);this.name='RequirementExtractionError';this.code=code;this.status=status;}
 }
 
+export function buildRequirementCandidates(sourceText, sourceInputId) {
+  if (typeof sourceText !== 'string' || typeof sourceInputId !== 'string' || !sourceInputId) return [];
+  const spans = [];
+  const append = (rawStart, rawEnd) => {
+    let start = rawStart, end = rawEnd;
+    while (start < end && /\s/u.test(sourceText[start])) start += 1;
+    while (end > start && /\s/u.test(sourceText[end - 1])) end -= 1;
+    while (start < end) {
+      let cut = Math.min(end, start + MAX_CANDIDATE_CHARS);
+      if (cut < end) {
+        let boundary = cut;
+        while (boundary > start && !/\s/u.test(sourceText[boundary - 1])) boundary -= 1;
+        if (boundary > start) cut = boundary;
+      }
+      let pieceEnd = cut;
+      while (pieceEnd > start && /\s/u.test(sourceText[pieceEnd - 1])) pieceEnd -= 1;
+      if (pieceEnd > start) spans.push({ start, end: pieceEnd });
+      start = cut;
+      while (start < end && /\s/u.test(sourceText[start])) start += 1;
+    }
+  };
+
+  const boundaryPattern = /(?:\r\n|\r|\n)+|(?<=[.!?])\s+|,\s+(?:but|whereas|while)\s+/giu;
+  let start = 0;
+  for (const match of sourceText.matchAll(boundaryPattern)) {
+    const boundaryStart = match.index;
+    const isContrast = match[0].startsWith(',');
+    append(start, isContrast ? boundaryStart + 1 : boundaryStart);
+    start = boundaryStart + match[0].length;
+  }
+  append(start, sourceText.length);
+
+  let boundedSpans = spans;
+  if (spans.length > MAX_CANDIDATES) {
+    boundedSpans = [];
+    let groupStart = null, groupEnd = null;
+    for (const span of spans) {
+      if (groupStart !== null && span.end - groupStart > MAX_CANDIDATE_CHARS) {
+        boundedSpans.push({ start: groupStart, end: groupEnd });
+        groupStart = null;
+      }
+      if (groupStart === null) groupStart = span.start;
+      groupEnd = span.end;
+    }
+    if (groupStart !== null) boundedSpans.push({ start: groupStart, end: groupEnd });
+  }
+
+  return boundedSpans.slice(0, MAX_CANDIDATES).map((span, index) => ({
+    candidateId: `${sourceInputId}:C${index + 1}`,
+    sourceInputId,
+    text: sourceText.slice(span.start, span.end),
+    start: span.start,
+    end: span.end,
+  }));
+}
+
 export function validateRequirementOutput(rawContent,sourceText) {
   let output; try { output=JSON.parse(rawContent); } catch { throw invalidOutput('INVALID_JSON'); }
   if (!isObject(output)||!exactKeys(output,['requirements'])||!Array.isArray(output.requirements)||output.requirements.length>20) throw invalidOutput('ROOT_OR_REQUIREMENT_ARRAY');
   return output.requirements.map((item)=>{
-    const fields=['requirementText','requirementType','priority','sourceEvidence','confidence','assumptions'];
+    const fields=['requirementText','requirementType','confidence'];
     if(!isObject(item))throw invalidOutput('REQUIREMENT_OBJECT_SHAPE',{field:'requirement',validationReason:'must be an object'});
-    if(!exactKeys(item,fields)){const missing=fields.filter((field)=>!Object.hasOwn(item,field));const unexpected=Object.keys(item).filter((field)=>!fields.includes(field));throw invalidOutput('REQUIREMENT_OBJECT_SHAPE',{field:missing[0]||unexpected[0]||'requirement',validationReason:missing.length?`missing required field${missing.length===1?'':'s'}`:'unexpected field',safeValue:{missing,unexpected}});}
+    const allowedFields=[...fields,'priority','assumptions'];
+    if(fields.some((field)=>!Object.hasOwn(item,field))||Object.keys(item).some((field)=>!allowedFields.includes(field))){const missing=fields.filter((field)=>!Object.hasOwn(item,field));const unexpected=Object.keys(item).filter((field)=>!allowedFields.includes(field));throw invalidOutput('REQUIREMENT_OBJECT_SHAPE',{field:missing[0]||unexpected[0]||'requirement',validationReason:missing.length?`missing required field${missing.length===1?'':'s'}`:'unexpected field',safeValue:{missing,unexpected}});}
     const requirementText=typeof item.requirementText==='string'?item.requirementText.trim():'';
-    const evidence=typeof item.sourceEvidence==='string'?item.sourceEvidence:'';
     if(!requirementText||requirementText.length>3000)throw invalidOutput('REQUIREMENT_FIELD_OR_CONFIDENCE',{field:'requirementText',validationReason:!requirementText?'must be a non-empty string':'exceeds 3000 characters',safeValue:{type:typeof item.requirementText,length:typeof item.requirementText==='string'?item.requirementText.length:null}});
     if(!requirementTypes.has(item.requirementType))throw invalidOutput('REQUIREMENT_FIELD_OR_CONFIDENCE',{field:'requirementType',validationReason:'must be one of the allowed requirement types',safeValue:safeEnum(item.requirementType,requirementTypes)});
-    if(!(item.priority===null||priorities.has(item.priority)))throw invalidOutput('REQUIREMENT_FIELD_OR_CONFIDENCE',{field:'priority',validationReason:'must be an allowed priority or null',safeValue:safeEnum(item.priority,priorities)});
-    if(!evidence.trim()||evidence.length>10000)throw invalidOutput('REQUIREMENT_FIELD_OR_CONFIDENCE',{field:'sourceEvidence',validationReason:!evidence.trim()?'must be a non-empty source quote':'exceeds 10000 characters',safeValue:{type:typeof item.sourceEvidence,length:typeof item.sourceEvidence==='string'?item.sourceEvidence.length:null}});
     if(!validConfidence(item.confidence))throw invalidOutput('REQUIREMENT_FIELD_OR_CONFIDENCE',{field:'confidence',validationReason:'must be a JSON number from 0 to 1',safeValue:typeof item.confidence==='string'?{type:'string',length:item.confidence.length}:safeScalar(item.confidence)});
-    if(!Array.isArray(item.assumptions))throw invalidOutput('ASSUMPTION_EVIDENCE',{field:'assumptions',validationReason:'must be an array of source-grounded strings',safeValue:{type:typeof item.assumptions}});
-    if(item.assumptions.length>3)throw invalidOutput('ASSUMPTION_EVIDENCE',{field:'assumptions',validationReason:'exceeds 3 items',safeValue:{count:item.assumptions.length}});
-    const invalidAssumption=item.assumptions.findIndex((a)=>typeof a!=='string'||!a.trim()||a.length>1000||!sourceText.includes(a));
-    if(invalidAssumption!==-1){const a=item.assumptions[invalidAssumption];throw invalidOutput('ASSUMPTION_EVIDENCE',{field:'assumptions',validationReason:typeof a!=='string'?'item must be a string':!a.trim()?'item must be non-empty':a.length>1000?'item exceeds 1000 characters':'item is not grounded in source',safeValue:{index:invalidAssumption,type:typeof a,length:typeof a==='string'?a.length:null}});}
-    if(item.priority&&item.priority!=='UNKNOWN'&&!new RegExp(`\\b${item.priority}\\b`,'i').test(evidence))throw invalidOutput('UNSUPPORTED_PRIORITY',{field:'priority',validationReason:'priority is not supported by the source quote',safeValue:item.priority});
-    const span=findSourceSpan(sourceText,evidence); if(!span)throw invalidOutput('SOURCE_EVIDENCE_NOT_FOUND',{field:'sourceEvidence',validationReason:'quote was not found in source text',safeValue:{type:'string',length:evidence.length}});
-    return {requirementText,requirementType:item.requirementType,priority:item.priority,sourceEvidence:sourceText.slice(span.start,span.end),sourceEvidenceStart:span.start,sourceEvidenceEnd:span.end,confidence:item.confidence,assumptions:item.assumptions.map((a)=>a.trim())};
+    const assumptions=Array.isArray(item.assumptions)?item.assumptions:[];
+    const span=findSourceSpan(sourceText,requirementText); if(!span)throw invalidOutput('SOURCE_EVIDENCE_NOT_FOUND',{field:'requirementText',validationReason:'candidate text was not found in source text',safeValue:{type:'string',length:requirementText.length}});
+    const sourceEvidence=sourceText.slice(span.start,span.end);
+    const proposedPriority=priorities.has(item.priority)||item.priority===null?item.priority:'UNKNOWN';
+    const priority=proposedPriority&&proposedPriority!=='UNKNOWN'&&!new RegExp(`\\b${proposedPriority}\\b`,'i').test(sourceEvidence)?'UNKNOWN':proposedPriority;
+    const groundedAssumptions=assumptions.filter((assumption)=>typeof assumption==='string'&&assumption.trim()&&assumption.length<=1000&&sourceText.includes(assumption)).slice(0,3).map((assumption)=>assumption.trim());
+    return {requirementText,requirementType:item.requirementType,priority,sourceEvidence,sourceEvidenceStart:span.start,sourceEvidenceEnd:span.end,confidence:item.confidence,assumptions:groundedAssumptions};
   });
 }
 

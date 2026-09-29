@@ -32,17 +32,20 @@ export function createRequirementsRouter({ database = pool, generateOutput, embe
 
   router.get('/projects/:projectId/requirements', async (request, response, next) => {
     if (!isUuid(request.params.projectId)) return sendError(response, 400, 'Project ID must be a UUID.', 'VALIDATION_ERROR');
+    const sourceInputId=request.query.sourceInputId;
+    if (sourceInputId!==undefined&&!isUuid(sourceInputId)) return sendError(response,400,'sourceInputId must be a UUID.','VALIDATION_ERROR');
     try {
       const project = await database.query('SELECT 1 FROM projects WHERE id=$1', [request.params.projectId]);
       if (!project.rowCount) return sendError(response, 404, 'Project not found.', 'PROJECT_NOT_FOUND');
+      if(sourceInputId){const input=await database.query('SELECT 1 FROM project_inputs WHERE id=$1 AND project_id=$2',[sourceInputId,request.params.projectId]);if(!input.rowCount)return sendError(response,404,'Input was not found in this project.','INPUT_NOT_FOUND');}
       const result = await database.query(
         `SELECT r.*, i.title AS source_input_title, i.source AS source_input_source,
            i.input_type AS source_input_type, i.original_filename AS source_input_filename
          FROM candidate_requirements r
          JOIN project_inputs i ON i.id=r.source_input_id
-         WHERE r.project_id=$1
+         WHERE r.project_id=$1 AND ($2::uuid IS NULL OR r.source_input_id=$2)
          ORDER BY r.created_at DESC, r.id`,
-        [request.params.projectId],
+        [request.params.projectId,sourceInputId||null],
       );
       response.json({ data: result.rows.map((row) => ({
         ...presentRequirement(row),

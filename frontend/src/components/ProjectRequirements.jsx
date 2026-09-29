@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 
@@ -31,27 +31,26 @@ export default function ProjectRequirements({ projectId }) {
   const [requirements, setRequirements] = useState([]);
   const [inputId, setInputId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingResult, setLoadingResult] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [intelligence, setIntelligence] = useState(null);
   const [findings, setFindings] = useState([]);
+  const resultRequest = useRef(0);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
+    setInputId('');
+    setRequirements([]);
+    setIntelligence(null);
+    setFindings([]);
     try {
-      const [projectInputs, projectRequirements, savedAnalysis] = await Promise.all([
-        api.projectInputs(projectId),
-        api.projectRequirements(projectId),
-        api.projectRequirementAnalysis(projectId),
-      ]);
+      const projectInputs = await api.projectInputs(projectId);
       const readyInputs = projectInputs.filter((input) => input.processingStatus === 'READY');
       setInputs(readyInputs);
-      setRequirements(projectRequirements);
-      setIntelligence(savedAnalysis.analysis);
-      setFindings(savedAnalysis.findings);
-      setInputId((current) => readyInputs.some((input) => input.id === current) ? current : readyInputs[0]?.id || '');
+      setInputId(readyInputs[0]?.id || '');
     } catch (requestError) {
       setError(requestErrorMessage(requestError));
     } finally {
@@ -61,6 +60,31 @@ export default function ProjectRequirements({ projectId }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    const requestId=++resultRequest.current;
+    setRequirements([]);
+    setIntelligence(null);
+    setFindings([]);
+    setError('');
+    if(!inputId){setLoadingResult(false);return;}
+    setLoadingResult(true);
+    Promise.all([api.projectRequirements(projectId,inputId),api.projectRequirementAnalysis(projectId,inputId)])
+      .then(([sourceRequirements,sourceAnalysis])=>{
+        if(requestId!==resultRequest.current)return;
+        const validRequirements=sourceRequirements.filter((requirement)=>requirement.sourceInputId===inputId);
+        const resultMatches=sourceAnalysis.sourceInputId===inputId&&(!sourceAnalysis.analysis||sourceAnalysis.analysis.sourceInputId===inputId);
+        setRequirements(validRequirements);
+        if(resultMatches){
+          const validIds=new Set(validRequirements.map((requirement)=>requirement.id));
+          const validFindings=sourceAnalysis.findings.filter((finding)=>finding.requirementIds.length>0&&finding.requirementIds.every((id)=>validIds.has(id)));
+          setIntelligence(validFindings.length===sourceAnalysis.findings.length?sourceAnalysis.analysis:null);
+          setFindings(validFindings.length===sourceAnalysis.findings.length?validFindings:[]);
+        }
+      })
+      .catch((requestError)=>{if(requestId===resultRequest.current)setError(requestErrorMessage(requestError));})
+      .finally(()=>{if(requestId===resultRequest.current)setLoadingResult(false);});
+  },[projectId,inputId]);
+
   async function extract() {
     if (!inputId) return;
     setExtracting(true);
@@ -68,9 +92,12 @@ export default function ProjectRequirements({ projectId }) {
     setNotice('');
     try {
       const result = await api.runRequirementsIntelligence(projectId, inputId);
-      setRequirements((current) => [...current.filter((item) => item.sourceInputId !== inputId), ...result.requirements]);
-      setIntelligence(result.analysis);
-      setFindings(result.findings);
+      if(result.sourceInputId!==inputId||result.requirements.some((requirement)=>requirement.sourceInputId!==inputId))throw new Error('The returned Requirements Intelligence result does not match the selected source input.');
+      const requirementIds=new Set(result.requirements.map((requirement)=>requirement.id));
+      if(result.findings.some((finding)=>finding.requirementIds.some((id)=>!requirementIds.has(id))))throw new Error('The returned findings do not belong to the selected source input.');
+      setRequirements(result.requirements);
+      setIntelligence(result.analysis?.sourceInputId===inputId?result.analysis:null);
+      setFindings(result.analysis?.sourceInputId===inputId?result.findings:[]);
       setNotice(`Requirements Intelligence completed with ${result.analysis.provider} · ${result.analysis.modelName}. ${result.requirements.length} source-linked requirements saved.`);
     } catch (requestError) {
       setError(requestErrorMessage(requestError));
@@ -86,7 +113,7 @@ export default function ProjectRequirements({ projectId }) {
       </div>
       <div className="requirements-extract-bar">
         {loading ? <span className="state-message">Loading READY inputs and candidate requirements…</span> : inputs.length ? <>
-          <label>READY source input<select value={inputId} onChange={(event) => setInputId(event.target.value)} disabled={extracting}>
+          <label>READY source input<select value={inputId} onChange={(event) => {setInputId(event.target.value);setRequirements([]);setIntelligence(null);setFindings([]);setNotice('');}} disabled={extracting}>
             {inputs.map((input) => <option key={input.id} value={input.id}>{input.title} · {input.source}</option>)}
           </select></label>
           <button className="button button-primary" type="button" onClick={extract} disabled={!inputId || extracting}>
@@ -97,8 +124,9 @@ export default function ProjectRequirements({ projectId }) {
       <p className="requirements-boundary-note">AI output is advisory. Confidence measures extraction/observation confidence, not regulatory compliance. Demo knowledge entries are non-authoritative.</p>
       {error && <p className="form-error requirements-error" role="alert">{error}</p>}
       {notice && <p className="requirements-notice" role="status">{notice}</p>}
-      {!loading && !error && requirements.length === 0 && <div className="input-empty"><strong>No candidate requirements yet</strong><span>Select a READY input and run Requirements Intelligence.</span></div>}
-      {intelligence && <section className="analysis-section" aria-label="Requirements Intelligence results">
+      {!loading && !loadingResult && !error && requirements.length === 0 && <div className="input-empty"><strong>No candidate requirements yet</strong><span>Select a READY input and run Requirements Intelligence.</span></div>}
+      {loadingResult&&<p className="state-message">Loading results for the selected source…</p>}
+      {intelligence && intelligence.sourceInputId===inputId && <section className="analysis-section" aria-label="Requirements Intelligence results">
         <h3>Analysis · {intelligence.requirementCount} requirements · {intelligence.findingCount} findings</h3>
         {!!intelligence.summary.clarificationQuestions.length && <div className="analysis-questions"><h3>Clarification questions</h3><ul>{intelligence.summary.clarificationQuestions.map((item) => <li key={item.findingId}>{item.question}</li>)}</ul></div>}
         {!!findings.length && <div className="analysis-findings">{findings.map((finding) => <article className="analysis-finding" key={finding.id}><header><div><span className="eyebrow">{humanize(finding.findingType)} · confidence {(finding.confidence * 100).toFixed(0)}%</span><h3>{finding.title}</h3></div><span className="analysis-severity">{humanize(finding.severity)}</span></header><p className="analysis-description">{finding.description}</p>{finding.evidence.map((evidence) => <blockquote className="requirement-evidence" key={`${evidence.requirementId}-${evidence.quote}`}><small>Requirement {evidence.requirementId}</small>{evidence.quote}</blockquote>)}{finding.clarificationQuestion && <p><strong>Question:</strong> {finding.clarificationQuestion}</p>}</article>)}</div>}
@@ -108,7 +136,7 @@ export default function ProjectRequirements({ projectId }) {
         </>}
         {!!intelligence.summary.intelligence?.complianceMappings.length && <div className="analysis-findings">{intelligence.summary.intelligence.complianceMappings.map((mapping, index) => <article className="analysis-finding" key={index}><h3>{mapping.title}</h3><p>{mapping.observation}</p>{mapping.citation && <blockquote className="requirement-evidence"><strong>{mapping.citation.title}</strong> · {mapping.citation.source}<br />{mapping.evidenceQuote}</blockquote>}<small>Confidence {(mapping.confidence * 100).toFixed(0)}% · Demo/non-authoritative unless source metadata says otherwise</small></article>)}</div>}
       </section>}
-      {!!requirements.length && <div className="requirements-list">{requirements.map((requirement) => <article className="requirement-card" key={requirement.id}>
+      {!!requirements.length && <div className="requirements-list">{requirements.filter((requirement)=>requirement.sourceInputId===inputId).map((requirement) => <article className="requirement-card" key={requirement.id}>
         <header><span className="eyebrow">{humanize(requirement.requirementType)}</span><span className="requirement-confidence">Extraction confidence · {(requirement.confidence * 100).toFixed(0)}%</span></header>
         <p className="requirement-text">{requirement.requirementText}</p>
         <dl className="requirement-metadata">

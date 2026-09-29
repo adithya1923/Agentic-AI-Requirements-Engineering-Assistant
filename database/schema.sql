@@ -115,12 +115,15 @@ CREATE TABLE IF NOT EXISTS requirement_analysis_runs (
 );
 
 ALTER TABLE requirement_analysis_runs ADD COLUMN IF NOT EXISTS provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE requirement_analysis_runs ADD COLUMN IF NOT EXISTS source_input_id UUID REFERENCES project_inputs(id) ON DELETE CASCADE;
 ALTER TABLE requirement_analysis_runs DROP CONSTRAINT IF EXISTS requirement_analysis_runs_requirement_ids_check;
 ALTER TABLE requirement_analysis_runs DROP CONSTRAINT IF EXISTS requirement_analysis_runs_requirement_count_check;
 ALTER TABLE requirement_analysis_runs ADD CONSTRAINT requirement_analysis_runs_requirement_count_check CHECK (requirement_count >= 0);
 
 CREATE INDEX IF NOT EXISTS requirement_analysis_runs_project_idx
   ON requirement_analysis_runs (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS requirement_analysis_runs_source_idx
+  ON requirement_analysis_runs (project_id, source_input_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS requirement_analysis_findings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

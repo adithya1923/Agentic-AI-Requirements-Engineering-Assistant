@@ -40,13 +40,14 @@ function outputForStage(output, request) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return output;
   if (stage === 'requirements') {
     if (Object.keys(parsed).length !== 5 || !Array.isArray(parsed.requirements)) return output;
-    return JSON.stringify({ requirements: parsed.requirements });
+    const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
+    const candidates=context.candidates;
+    return JSON.stringify({ requirements: parsed.requirements.map((requirement) => {
+      const candidate=candidates.find((item)=>item.text===requirement.requirementText);
+      return { candidateId:candidate?.candidateId||'unmatched-source-candidate',requirementType:requirement.requirementType,confidence:requirement.confidence };
+    }) });
   }
-  const analysisKeys = ['findings', 'securityPrivacy', 'risks', 'complianceMappings'];
-  if (analysisKeys.every((key) => Array.isArray(parsed[key]))) {
-    return JSON.stringify(Object.fromEntries(analysisKeys.map((key) => [key, parsed[key]])));
-  }
-  return output;
+  return JSON.stringify({ findings: [] });
 }
 
 async function createProject(name) {
@@ -111,7 +112,7 @@ after(async () => {
 test('extracts structured candidates, persists evidence offsets, and exposes API traceability', async () => {
   nextOutput = validResponse([requirement(), requirement({
     key: 'N2',
-    requirementText: 'The service must retain the status history for 90 days.',
+    requirementText: 'The service must retain the status history for 90 days with HIGH priority.',
     requirementType: 'CONSTRAINT', priority: 'HIGH',
     sourceEvidence: 'The service must retain the status history for 90 days with HIGH priority.',
     confidence: 0.88, assumptions: ['Assume all timestamps use UTC.'],
@@ -131,7 +132,7 @@ test('extracts structured candidates, persists evidence offsets, and exposes API
   assert.equal(body.requirements[0].sourceEvidenceStart, sourceText.indexOf(body.requirements[0].sourceEvidence));
   assert.equal(body.requirements[0].sourceEvidenceEnd, body.requirements[0].sourceEvidenceStart + body.requirements[0].sourceEvidence.length);
   assert.equal(body.requirements[1].priority, 'HIGH');
-  assert.equal(body.requirements[1].assumptions.length, 1);
+  assert.deepEqual(body.requirements[1].assumptions, []);
 
   const listResponse = await fetch(`${baseUrl}/projects/${projectId}/requirements`);
   const listed = (await listResponse.json()).data;
@@ -143,16 +144,14 @@ test('extracts structured candidates, persists evidence offsets, and exposes API
   assert.equal(detail.sourceEvidence, body.requirements[0].sourceEvidence);
 });
 
-test('maps whitespace-normalized model evidence back to the exact source slice and offsets', async () => {
-  const rawEvidence = 'The portal shall show transaction status to the customer.\nAssume all timestamps use UTC.';
+test('candidate selection maps to the exact source slice and offsets', async () => {
   nextOutput = validResponse([requirement({
     requirementText: 'The portal shall show transaction status to the customer.',
-    sourceEvidence: rawEvidence,
   })]);
   const response = await extract(projectId, textInputId);
   assert.equal(response.status, 200);
   const saved = (await response.json()).data.requirements[0];
-  const canonicalEvidence = 'The portal shall show transaction status to the customer. Assume all timestamps use UTC.';
+  const canonicalEvidence = 'The portal shall show transaction status to the customer.';
   assert.equal(saved.sourceEvidence, canonicalEvidence);
   assert.equal(saved.sourceEvidenceStart, sourceText.indexOf(canonicalEvidence));
   assert.equal(saved.sourceEvidenceEnd, saved.sourceEvidenceStart + canonicalEvidence.length);
@@ -172,14 +171,14 @@ test('uses Phase 3 extracted document text and includes financial project contex
   assert.match(extraction.userPrompt, /A loan application shall show its review status\./);
   assert.ok(extraction.responseSchema.properties.requirements);
   assert.equal(extraction.modelPurpose, 'requirements-intelligence');
-  assert.deepEqual(analysis.responseSchema.required, ['findings', 'securityPrivacy', 'risks', 'complianceMappings']);
+  assert.deepEqual(analysis.responseSchema.required, ['findings']);
   assert.equal(generationCalls.length, previousCallCount + 2);
 });
 
 test('a successful repeat replaces prior candidates for that input instead of duplicating them', async () => {
   const before = (await (await fetch(`${baseUrl}/projects/${projectId}/requirements`)).json()).data
     .filter((item) => item.sourceInputId === textInputId);
-  nextOutput = validResponse([requirement({ requirementText: 'The portal must display customer transaction status.' })]);
+  nextOutput = validResponse([requirement({ requirementText: 'The portal shall show transaction status to the customer.' })]);
   const response = await extract(projectId, textInputId);
   assert.equal(response.status, 200);
   const created = (await response.json()).data.requirements;
@@ -190,16 +189,14 @@ test('a successful repeat replaces prior candidates for that input instead of du
   assert.equal(after.length, 1);
 });
 
-test('invalid JSON, type, confidence, and unsupported evidence fail safely without replacing prior candidates', async () => {
+test('invalid JSON, type, confidence, and candidate selection fail safely without replacing prior candidates', async () => {
   const prior = await (await fetch(`${baseUrl}/projects/${projectId}/requirements`)).json();
   const priorIds = prior.data.map((item) => item.id);
   const invalidOutputs = [
     '{not json',
     validResponse([requirement({ requirementType: 'REGULATORY_DECISION' })]),
     validResponse([requirement({ confidence: 1.2 })]),
-    validResponse([requirement({ sourceEvidence: 'Not present in the source.' })]),
-    validResponse([requirement({ priority: 'HIGH' })]),
-    validResponse([requirement({ assumptions: ['The system supports biometric authentication.'] })]),
+    validResponse([requirement({ requirementText: 'The portal should show customer status.' })]),
     JSON.stringify({ requirements: [], unexpected: true }),
   ];
   for (const output of invalidOutputs) {
@@ -210,6 +207,25 @@ test('invalid JSON, type, confidence, and unsupported evidence fail safely witho
     const after = await (await fetch(`${baseUrl}/projects/${projectId}/requirements`)).json();
     assert.deepEqual(new Set(after.data.map((item) => item.id)), new Set(priorIds));
   }
+});
+
+test('normalizes unsupported inferred priority instead of rejecting the extraction', async () => {
+  nextOutput = validResponse([requirement({ priority: 'HIGH' })]);
+  const response = await extract(projectId, textInputId);
+  assert.equal(response.status, 200, await response.clone().text());
+  const body = (await response.json()).data;
+  assert.equal(body.requirements[0].priority, null);
+  assert.equal(body.requirements[0].sourceEvidence, requirement().requirementText);
+});
+
+test('normalizes malformed priority and assumptions metadata from Call 1', async () => {
+  const candidate = requirement({ priority: 'URGENT', assumptions: { inferred: 'not source grounded' } });
+  nextOutput = validResponse([candidate]);
+  const response = await extract(projectId, textInputId);
+  assert.equal(response.status, 200, await response.clone().text());
+  const body = (await response.json()).data;
+  assert.equal(body.requirements[0].priority, null);
+  assert.deepEqual(body.requirements[0].assumptions, []);
 });
 
 test('an empty valid extraction replaces previous candidates with an empty result', async () => {
