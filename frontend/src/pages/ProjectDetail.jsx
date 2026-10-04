@@ -23,13 +23,13 @@ export default function ProjectDetail() {
   return (
     <section className="page-section detail-page">
       <Link className="back-link" to="/projects">← All projects</Link>
-      <div className="detail-header"><div className="detail-icon">LC</div><div><span className="eyebrow">PROJECT OVERVIEW</span><h1>{project.name}</h1><p>{project.selectedDomain}</p></div><StatusPill>{project.status.toLowerCase()}</StatusPill></div>
+      <div className="detail-header"><div className="detail-icon">FS</div><div><span className="eyebrow">PROJECT OVERVIEW</span><h1>{project.name}</h1><p>{project.selectedDomain}</p></div><StatusPill>{project.status.toLowerCase()}</StatusPill></div>
       <div className="detail-grid">
         <article className="detail-card detail-main"><span className="eyebrow">PROJECT BRIEF</span><h2>Project context</h2><p>{project.description || 'No project description has been added yet.'}</p></article>
         <article className="detail-card"><span className="eyebrow">OWNERSHIP</span><h2>{project.ownerName || 'Unassigned'}</h2><p>Project owner</p></article>
         <article className="detail-card"><span className="eyebrow">CREATED</span><h2>{new Date(project.createdAt).toLocaleDateString()}</h2><p>Last updated {new Date(project.updatedAt).toLocaleDateString()}</p></article>
       </div>
-      <div className="advisory-note"><span className="note-icon">i</span><p><strong>Requirements Intelligence.</strong> One bounded model request extracts source-linked candidates and reviews their quality, ambiguity, completeness, conflicts, security, privacy, risk, and knowledge-base evidence. Results are advisory; original input text is preserved.</p></div>
+      <div className="advisory-note"><span className="note-icon">i</span><p><strong>Requirements Intelligence.</strong> Structured model steps extract source-linked candidates, analyze quality and ambiguity, classify requirements, and retrieve related knowledge-base evidence. Results are advisory; original input text is preserved.</p></div>
       <ProjectInputs projectId={projectId} />
       <ProjectRequirements projectId={projectId} />
     </section>

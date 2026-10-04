@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(160) NOT NULL CHECK (length(trim(name)) > 0),
   description TEXT NOT NULL DEFAULT '',
-  selected_domain VARCHAR(120) NOT NULL DEFAULT 'Trade Finance / Letter of Credit',
+  selected_domain VARCHAR(120) NOT NULL DEFAULT 'General Financial',
   status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'ACTIVE', 'ARCHIVED')),
   owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE INDEX IF NOT EXISTS projects_updated_at_idx ON projects (updated_at DESC);
 CREATE INDEX IF NOT EXISTS projects_owner_id_idx ON projects (owner_id);
+ALTER TABLE projects ALTER COLUMN selected_domain SET DEFAULT 'General Financial';
 
 CREATE TABLE IF NOT EXISTS project_inputs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,7 +75,7 @@ CREATE TABLE IF NOT EXISTS candidate_requirements (
   source_input_id UUID NOT NULL REFERENCES project_inputs(id) ON DELETE CASCADE,
   requirement_text TEXT NOT NULL CHECK (length(trim(requirement_text)) BETWEEN 1 AND 3000),
   requirement_type TEXT NOT NULL CHECK (requirement_type IN (
-    'FUNCTIONAL', 'NON_FUNCTIONAL', 'BUSINESS_RULE', 'CONSTRAINT', 'OTHER', 'UNKNOWN'
+    'FUNCTIONAL', 'NON_FUNCTIONAL', 'BUSINESS_RULE', 'CONSTRAINT', 'SECURITY', 'OTHER', 'UNKNOWN'
   )),
   priority TEXT CHECK (priority IS NULL OR priority IN ('HIGH', 'MEDIUM', 'LOW', 'UNKNOWN')),
   source_evidence TEXT NOT NULL CHECK (length(trim(source_evidence)) BETWEEN 1 AND 10000),
@@ -90,8 +91,19 @@ CREATE TABLE IF NOT EXISTS candidate_requirements (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Keep existing databases compatible with the final semantic classification taxonomy.
+ALTER TABLE candidate_requirements DROP CONSTRAINT IF EXISTS candidate_requirements_requirement_type_check;
+ALTER TABLE candidate_requirements ADD CONSTRAINT candidate_requirements_requirement_type_check
+  CHECK (requirement_type IN ('FUNCTIONAL', 'NON_FUNCTIONAL', 'BUSINESS_RULE', 'CONSTRAINT', 'SECURITY', 'OTHER', 'UNKNOWN'));
+
 ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS generation_provider TEXT NOT NULL DEFAULT 'unknown';
 ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS generation_model VARCHAR(120) NOT NULL DEFAULT 'unknown';
+ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'DRAFT';
+ALTER TABLE candidate_requirements DROP CONSTRAINT IF EXISTS candidate_requirements_review_status_check;
+ALTER TABLE candidate_requirements ADD CONSTRAINT candidate_requirements_review_status_check
+  CHECK (review_status IN ('DRAFT', 'REVIEWED', 'APPROVED', 'REJECTED', 'MODIFIED'));
+ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE candidate_requirements ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS candidate_requirements_project_idx
   ON candidate_requirements (project_id, created_at DESC);
@@ -224,6 +236,26 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_document_idx
 CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_hnsw_idx
   ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
 
+CREATE TABLE IF NOT EXISTS sdlc_analyses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'REVIEWED', 'APPROVED', 'REJECTED', 'MODIFIED')),
+  factors JSONB NOT NULL CHECK (jsonb_typeof(factors) = 'object'),
+  ranking JSONB NOT NULL CHECK (jsonb_typeof(ranking) = 'array'),
+  recommendation TEXT NOT NULL,
+  explanation TEXT NOT NULL,
+  workflow JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(workflow) = 'array'),
+  artefacts JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(artefacts) = 'array'),
+  requirement_ids UUID[] NOT NULL DEFAULT '{}',
+  provider TEXT NOT NULL,
+  model_name VARCHAR(120) NOT NULL,
+  review_note TEXT,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sdlc_analyses_project_idx ON sdlc_analyses(project_id, created_at DESC);
+
 INSERT INTO users (id, display_name, email, role)
 VALUES ('00000000-0000-4000-8000-000000000001', 'Local Development Owner', 'owner@local.test', 'ADMIN')
 ON CONFLICT (id) DO NOTHING;
@@ -231,10 +263,14 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO projects (id, name, description, selected_domain, status, owner_id)
 VALUES (
   '00000000-0000-4000-8000-000000000002',
-  'Trade Finance / Letter of Credit Requirements Project',
-  'Initial project context for requirements engineering on software supporting Trade Finance / Letter-of-Credit workflows.',
-  'Trade Finance / Letter of Credit',
+  'Financial Services Requirements Project',
+  'Initial multi-domain project context for financial-sector requirements engineering.',
+  'General Financial',
   'DRAFT',
   '00000000-0000-4000-8000-000000000001'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  selected_domain = EXCLUDED.selected_domain,
+  updated_at = now();

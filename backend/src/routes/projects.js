@@ -49,7 +49,7 @@ router.get('/:id', async (request, response, next) => {
 });
 
 router.post('/', async (request, response, next) => {
-  const { name, description = '', selectedDomain = 'Trade Finance / Letter of Credit', ownerId = null } = request.body || {};
+  const { name, description = '', selectedDomain = 'General Financial', ownerId = null } = request.body || {};
   if (typeof name !== 'string' || !name.trim()) {
     return response.status(400).json({ error: { message: 'name is required', code: 'VALIDATION_ERROR' } });
   }

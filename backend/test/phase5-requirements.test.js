@@ -36,7 +36,7 @@ function validResponse(requirements = [requirement()]) {
 function outputForStage(output, request) {
   let parsed;
   try { parsed = JSON.parse(output); } catch { return output; }
-  const stage = request.responseSchema.required.includes('requirements') ? 'requirements' : 'analysis';
+  const stage = request.responseSchema.required.includes('requirements') ? 'requirements' : request.responseSchema.required.includes('findings') ? 'analysis' : 'classification';
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return output;
   if (stage === 'requirements') {
     if (Object.keys(parsed).length !== 5 || !Array.isArray(parsed.requirements)) return output;
@@ -44,10 +44,15 @@ function outputForStage(output, request) {
     const candidates=context.candidates;
     return JSON.stringify({ requirements: parsed.requirements.map((requirement) => {
       const candidate=candidates.find((item)=>item.text===requirement.requirementText);
-      return { candidateId:candidate?.candidateId||'unmatched-source-candidate',requirementType:requirement.requirementType,confidence:requirement.confidence };
+      return { candidateId:candidate?.candidateId||'unmatched-source-candidate',confidence:requirement.confidence };
     }) });
   }
-  return JSON.stringify({ findings: [] });
+  if(stage==='analysis') return JSON.stringify({ findings: [] });
+  const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
+  return JSON.stringify({classifications:context.requirements.map((item)=>{
+    const sourceRequirement=parsed.requirements.find((requirement)=>requirement.key===item.requirementId||requirement.requirementText===item.requirementText);
+    return {requirementId:item.requirementId,classification:(sourceRequirement?.requirementType||'FUNCTIONAL').toLowerCase(),confidence:0.9};
+  })});
 }
 
 async function createProject(name) {
@@ -167,12 +172,13 @@ test('uses Phase 3 extracted document text and includes financial project contex
   const response = await extract(projectId, documentInputId);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).data.sourceInput.inputType, 'DOCUMENT');
-  const [extraction, analysis] = generationCalls.slice(previousCallCount);
+  const [extraction, analysis, classification] = generationCalls.slice(previousCallCount);
   assert.match(extraction.userPrompt, /A loan application shall show its review status\./);
   assert.ok(extraction.responseSchema.properties.requirements);
   assert.equal(extraction.modelPurpose, 'requirements-intelligence');
   assert.deepEqual(analysis.responseSchema.required, ['findings']);
-  assert.equal(generationCalls.length, previousCallCount + 2);
+  assert.deepEqual(classification.responseSchema.required, ['classifications']);
+  assert.equal(generationCalls.length, previousCallCount + 3);
 });
 
 test('a successful repeat replaces prior candidates for that input instead of duplicating them', async () => {

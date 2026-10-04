@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { maskSensitiveText } from './sensitive-data.js';
 
 export class EmbeddingProviderError extends Error {
   constructor(message) {
@@ -48,12 +49,12 @@ export async function generateEmbeddings(texts, { fetchImpl = fetch, model = con
 
 export function embedDocumentChunks(chunks, title, options = {}) {
   const inputs = chunks.map(({ chunkText }) => config.knowledge.documentEmbeddingPrefix
-    .replaceAll('{title}', title)
-    .replaceAll('{text}', chunkText));
+    .replaceAll('{title}', maskSensitiveText(title))
+    .replaceAll('{text}', maskSensitiveText(chunkText)));
   return generateEmbeddings(inputs, options);
 }
 
 export function embedSearchQuery(query, options = {}) {
-  const input = config.knowledge.queryEmbeddingPrefix.replaceAll('{query}', query);
+  const input = config.knowledge.queryEmbeddingPrefix.replaceAll('{query}', maskSensitiveText(query));
   return generateEmbeddings([input], options).then(([embedding]) => embedding);
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-const initialDomain = 'Trade Finance / Letter of Credit';
+const initialDomain = 'General Financial';
 
 export default function ProjectForm({ onCreate, onCancel }) {
   const [name, setName] = useState('');

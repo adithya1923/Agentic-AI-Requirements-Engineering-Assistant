@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createKnowledgeRouter } from './routes/knowledge.js';
 import { createRequirementsRouter } from './routes/requirements.js';
 import { createRequirementAnalysisRouter } from './routes/requirement-analysis.js';
+import { createSdlcRouter } from './routes/sdlc.js';
 
 export function createApp(options = {}) {
   const app = express();
@@ -26,6 +27,7 @@ export function createApp(options = {}) {
     generateOutput: options.generateOutput,
     modelName: options.modelName,
   }));
+  app.use('/api', createSdlcRouter(options));
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

@@ -1,23 +1,21 @@
-# Requirements Intelligence (Agent 1)
+# Requirements Intelligence Agent
 
-Requirements Intelligence replaces the former separate Phase 5 extraction and Phase 6 analysis operations. A selected READY input is processed alongside the project's current candidate requirements in one compact structured generation request. Deterministic backend code handles retrieval, validation, IDs, persistence, and traceability; the model does not orchestrate other agents.
+Agent 1 is the bounded requirements extraction and analysis workflow described in [the implemented architecture](architecture.md). Its responsibilities are to select source-grounded requirements, classify them, identify supported quality findings, retrieve separate knowledge evidence, and prepare persisted results for human review.
 
-## Request and limits
+## Endpoints and behavior
 
-`POST /api/projects/:projectId/requirements/intelligence` accepts `{ "inputId": "<uuid>" }`. The compatibility `requirements/extract` route delegates to the same service. The operation retrieves up to four Phase 4 pgvector chunks using Ollama EmbeddingGemma, then sends one request to the configured generation provider. Provider retries and provider fallbacks are disabled for this operation; failures leave prior candidates and findings unchanged.
+`POST /api/projects/:projectId/requirements/intelligence` accepts `{ "inputId": "<uuid>" }`. The selected input must belong to the project and be READY. The API reads submitted or extracted text from PostgreSQL, builds bounded source candidates, and resolves all final requirement evidence and offsets from that authoritative source. Candidate IDs and model output are validated before persistence. Classification, findings, clarification questions, confidence, and retrieval metadata are stored in analysis runs/findings.
 
-The selected source input is limited to 12,000 characters. At most 6 existing requirements enter context, at most 5 new candidates and 6 findings are returned; security/privacy is limited to 2 observations, and risk and compliance to 1 each. Retrieval contributes at most one 250-character excerpt. The fully serialized prompt is limited to 18,000 characters; output is capped at 1,100 generation tokens. Oversized inputs/context fail clearly rather than being truncated. Output fields, evidence, confidence, enums, IDs, and citations are validated server-side.
+`GET /api/projects/:projectId/requirements?sourceInputId=<uuid>` returns persisted candidates with their source input metadata. `GET /api/projects/:projectId/requirements/analysis?sourceInputId=<uuid>` returns the latest successful run and its findings for that source. `PATCH /api/requirements/:id/review` persists a review state and optional revised text while retaining the original evidence.
 
-## Persistence and evidence
+## Retrieval and privacy
 
-New candidate UUIDs are assigned after the response has passed exact-source evidence validation. Findings refer to existing UUIDs or temporary `N1`–`N20` keys, which the backend maps to persisted candidate UUIDs before storing. Conflicts/consistency findings require at least two candidates. Original project input text is read-only during this flow.
+Knowledge documents form a shared multi-domain corpus, independent of projects. The agent searches pgvector using the separately configured Ollama embedding model. Retrieved chunks keep document/chunk IDs, source, authority metadata, domain and similarity and are displayed separately from project source evidence. Demo corpus entries explicitly say they are non-authoritative.
 
-The existing `requirement_analysis_runs` and `requirement_analysis_findings` tables store the latest successful result. The run summary retains security/privacy observations, risks, compliance mappings, retrieved evidence metadata, confidence, and timestamps; finding rows preserve requirement IDs, source quotes, clarification questions, and confidence. Knowledge-base citations must reference retrieved chunk IDs and exact chunk text. When the retrieval service has no usable results, the UI reports “No supporting knowledge-base evidence found.” The bundled demo corpus is explicitly labelled `DEMO / NON-AUTHORITATIVE` and must not be treated as official regulatory material.
+Common email, long number, phone-like, and IBAN patterns are masked, without changing string length, before generation and embedding calls. Original project inputs and source offsets stay unchanged in PostgreSQL. Pattern masking has known limits and cannot guarantee removal of every confidential value.
 
-## Demo data
+## Provider behavior
 
-Run `npm run db:init`, then `npm run seed:demo`. The idempotent seed creates one financial-services project, six READY inputs covering onboarding, payments, lending, fraud, and trade finance (including deliberately ambiguous/conflicting statements), and two small demo policy notes embedded with the existing embedding model. No frontend mocks are involved.
+Generation provider settings are server-side. Agent 1 pins each operation to `LLM_GENERATION_PROVIDER`, uses structured output, and does not fail over to a different provider. Provider unavailability, quota, timeout, invalid JSON, or failed validation is returned as an error and does not create fabricated result rows or replace the previous successful result. Embedding failures are handled separately from generation failures.
 
-## Provider and scope
-
-Gemini generation uses the official `@google/genai` SDK structured-output API. Groq and Ollama use the shared generation service's supported JSON modes. API keys stay in backend `.env`; messages returned to the browser are sanitized and provider-neutral. The agent offers advisory analysis and does not make binding legal, compliance, or regulatory determinations. Agent 2, which recommends an SDLC and gives software-engineering justification, is deferred.
+All findings and retrieved sources are advisory. The agent does not make binding legal, regulatory, compliance, or fraud determinations.

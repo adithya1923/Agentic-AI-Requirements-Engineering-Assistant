@@ -46,7 +46,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <Link className="brand" to="/" aria-label="Trade Finance Requirements Assistant home"><span className="brand-symbol"><i /><i /><i /></span><span className="brand-name">Requirements<span>assistant</span></span></Link>
+        <Link className="brand" to="/" aria-label="Financial-Sector Requirements Assistant home"><span className="brand-symbol"><i /><i /><i /></span><span className="brand-name">Requirements<span>assistant</span></span></Link>
         <nav className="main-nav" aria-label="Main navigation">
           <NavLink end to="/">Overview</NavLink>
           <NavLink to="/projects">Projects</NavLink>
@@ -66,7 +66,7 @@ function App() {
         </Routes>
       </main>
 
-      <footer className="footer"><span>Financial-Sector Requirements Assistant <span className="footer-dot">·</span> Phase 4 retrieval foundation</span><span>Multi-domain</span></footer>
+      <footer className="footer"><span>Financial-Sector Requirements Assistant <span className="footer-dot">·</span> Two-agent advisory workflow</span><span>Multi-domain</span></footer>
 
       {formOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setFormOpen(false); }}><ProjectForm onCreate={createProject} onCancel={() => setFormOpen(false)} /></div>}
     </div>

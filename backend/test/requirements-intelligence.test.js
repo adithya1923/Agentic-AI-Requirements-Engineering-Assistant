@@ -20,7 +20,7 @@ function outputFor(request) {
     requirements: [
       { key:'N1', requirementText:'The platform should approve every loan after a manager reviews it,', requirementType:'BUSINESS_RULE', priority:null, sourceEvidence:'The platform should approve every loan after a manager reviews it,', confidence:0.94, assumptions:[] },
       { key:'N2', requirementText:'no loan may be approved until two managers have approved it.', requirementType:'BUSINESS_RULE', priority:null, sourceEvidence:'no loan may be approved until two managers have approved it.', confidence:0.92, assumptions:[] },
-      { key:'N3', requirementText:'Users should authenticate securely.', requirementType:'NON_FUNCTIONAL', priority:null, sourceEvidence:'Users should authenticate securely.', confidence:0.89, assumptions:[] },
+      { key:'N3', requirementText:'Users should authenticate securely.', requirementType:'SECURITY', priority:null, sourceEvidence:'Users should authenticate securely.', confidence:0.89, assumptions:[] },
       { key:'N4', requirementText:'Keep customer records for an appropriate period.', requirementType:'CONSTRAINT', priority:null, sourceEvidence:'Keep customer records for an appropriate period.', confidence:0.88, assumptions:[] },
       { key:'N5', requirementText:'The system should be fast.', requirementType:'NON_FUNCTIONAL', priority:null, sourceEvidence:'The system should be fast.', confidence:0.84, assumptions:[] },
     ],
@@ -39,27 +39,36 @@ function outputFor(request) {
 function requirementOnlyOutputFor(request) {
   const output=JSON.parse(outputFor(request));
   const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
-  return JSON.stringify({requirements:output.requirements.map(({requirementText,requirementType,confidence})=>{
+  return JSON.stringify({requirements:output.requirements.map(({requirementText,confidence})=>{
     const candidate=context.candidates.find((entry)=>entry.text===requirementText);
     assert.ok(candidate,`test fixture requirement has no exact source candidate: ${requirementText}`);
-    return {candidateId:candidate.candidateId,requirementType,confidence};
+    return {candidateId:candidate.candidateId,confidence};
   })});
 }
 function analysisOnlyOutputFor(request) {
   const output=JSON.parse(outputFor(request));
   const conflict=output.findings.find((finding)=>finding.findingType==='CONFLICT');
+  const evidenceByRequirement=new Map(output.requirements.map((requirement)=>[requirement.key,requirement.requirementText]));
   const findings=[
-    ...conflict.requirementIds.map((requirementId)=>({requirementId,findingType:conflict.findingType,description:conflict.description,severity:conflict.severity,clarificationQuestion:conflict.clarificationQuestion})),
-    ...output.findings.filter((finding)=>!['CONFLICT','CONSISTENCY'].includes(finding.findingType)).map(({requirementIds,...finding})=>({requirementId:requirementIds[0],findingType:finding.findingType,description:finding.description,severity:finding.severity,clarificationQuestion:finding.clarificationQuestion})),
+    {requirementId:conflict.requirementIds[0],relatedRequirementId:conflict.requirementIds[1],findingType:conflict.findingType,description:conflict.description,evidenceText:evidenceByRequirement.get(conflict.requirementIds[0]),relatedEvidenceText:evidenceByRequirement.get(conflict.requirementIds[1]),severity:conflict.severity,clarificationQuestion:conflict.clarificationQuestion,confidence:conflict.confidence},
+    ...output.findings.filter((finding)=>!['CONFLICT','CONSISTENCY'].includes(finding.findingType)).map(({requirementIds,...finding})=>({requirementId:requirementIds[0],evidenceText:evidenceByRequirement.get(requirementIds[0]),findingType:finding.findingType,description:finding.description,severity:finding.severity,clarificationQuestion:finding.clarificationQuestion,confidence:finding.confidence})),
   ];
   return JSON.stringify({findings});
 }
-function runWithKnowledge() {
+function classificationOnlyOutputFor(request) {
+  const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
+  const fixture=JSON.parse(outputFor(request));
+  const byText=new Map(fixture.requirements.map((requirement)=>[requirement.requirementText,requirement.requirementType]));
+  const classifications=context.requirements.map((requirement)=>({requirementId:requirement.requirementId,classification:(byText.get(requirement.requirementText)||'FUNCTIONAL').toLowerCase(),confidence:0.9}));
+  return JSON.stringify({classifications});
+}
+function stageFor(request) { return request.responseSchema.required.includes('requirements')?'requirements':request.responseSchema.required.includes('findings')?'analysis':'classification'; }
+function runWithKnowledge(authority='Test authority',tags=[]) {
   const database={
-    query:(sql,params)=>sql.includes('FROM knowledge_chunks c')?Promise.resolve({rows:[{chunk_id:citationChunkId,document_id:'00000000-0000-4000-8000-000000000098',title:'Citation fixture',source:'Test source',authority:null,tags:[],chunk_text:citationChunkText,similarity:0.9}]}):pool.query(sql,params),
+    query:(sql,params)=>sql.includes('FROM knowledge_chunks c')?Promise.resolve({rows:[{chunk_id:citationChunkId,document_id:'00000000-0000-4000-8000-000000000098',title:'Citation fixture',source:'Test source',authority,document_type:'ORGANIZATIONAL_POLICY',tags,chunk_text:citationChunkText,similarity:0.9}]}):pool.query(sql,params),
     connect:()=>pool.connect(),
   };
-  return createRequirementAnalysisService({database,embedQuery:async()=>Array(768).fill(0.01),generateOutput:async(request)=>request.responseSchema.required.includes('requirements')?requirementOnlyOutputFor(request):analysisOnlyOutputFor(request)})(projectId,inputId);
+  return createRequirementAnalysisService({database,embedQuery:async()=>Array(768).fill(0.01),generateOutput:async(request)=>{const stage=stageFor(request);return stage==='requirements'?requirementOnlyOutputFor(request):stage==='analysis'?analysisOnlyOutputFor(request):classificationOnlyOutputFor(request);}})(projectId,inputId);
 }
 function extractionResult(sourceText, requirementText, priority=null, assumptions) {
   const requirement={requirementText,requirementType:'FUNCTIONAL',priority,confidence:0.9};
@@ -104,19 +113,44 @@ test('Call 1 defaults missing or empty assumptions and retains only verbatim sou
   assert.deepEqual(malformedAssumptions.assumptions,[]);
 });
 
-test('candidate generation keeps exact source spans and stays bounded',()=>{
+test('candidate generation keeps exact source spans and rejects excessive semantic span counts',()=>{
   const inputIdForCandidates='source-input-candidates';
   const candidateSource='First requirement.\r\nSecond requirement, but a separate conflicting clause.\nThird requirement.';
   const candidates=buildRequirementCandidates(candidateSource,inputIdForCandidates);
   assert.deepEqual(candidates.map(({text})=>text),['First requirement.','Second requirement,','a separate conflicting clause.','Third requirement.']);
+  assert.deepEqual(candidates.map(({candidateId})=>candidateId),['C1','C2','C3','C4']);
   for(const candidate of candidates){
     assert.equal(candidate.sourceInputId,inputIdForCandidates);
     assert.equal(candidateSource.slice(candidate.start,candidate.end),candidate.text);
   }
   const many=Array.from({length:500},(_,index)=>`Requirement ${index+1} is stated here.`).join('\n');
-  const bounded=buildRequirementCandidates(many,inputIdForCandidates);
-  assert.ok(bounded.length<=80);
-  assert.ok(bounded.every(({start,end,text})=>many.slice(start,end)===text));
+  assert.throws(()=>buildRequirementCandidates(many,inputIdForCandidates),(error)=>error.code==='INTELLIGENCE_CANDIDATES_TOO_MANY');
+  assert.throws(()=>buildRequirementCandidates(`The system shall ${'describe '.repeat(400)}`,inputIdForCandidates),(error)=>error.code==='SOURCE_CANDIDATE_TOO_LONG');
+});
+
+test('candidate generation separates coordinated software actions into exact source spans',()=>{
+  const source='The system shall register applicants, validate documents, perform credit checks, notify applicants, and allow administrators to review applications.';
+  const candidates=buildRequirementCandidates(source,'source-input-atomic');
+  assert.deepEqual(candidates.map(({text})=>text),[
+    'The system shall register applicants,','validate documents,','perform credit checks,','notify applicants,','allow administrators to review applications.',
+  ]);
+  assert.deepEqual(candidates.map(({requirementText})=>requirementText),[
+    'The system shall register applicants,','The system shall validate documents,','The system shall perform credit checks,','The system shall notify applicants,','The system shall allow administrators to review applications.',
+  ]);
+  for(const candidate of candidates) assert.equal(source.slice(candidate.start,candidate.end),candidate.text);
+});
+
+test('candidate generation keeps conditional clauses attached to the behavior they qualify',()=>{
+  const source='The applicant submits a form. The portal confirms receipt; if verification fails, it explains which information must be corrected.';
+  const candidates=buildRequirementCandidates(source,'source-input-conditional');
+  assert.deepEqual(candidates.map(({text})=>text),[
+    'The applicant submits a form.',
+    'The portal confirms receipt; if verification fails, it explains which information must be corrected.',
+  ]);
+  const coordinated='The service shall preserve audit records during a declared outage and reconcile them after service restoration.';
+  const actions=buildRequirementCandidates(coordinated,'source-input-context');
+  assert.equal(actions[1].requirementText,'The service shall reconcile them after service restoration.');
+  for(const candidate of candidates) assert.equal(source.slice(candidate.start,candidate.end),candidate.text);
 });
 
 before(async () => {
@@ -127,9 +161,9 @@ before(async () => {
     if(failProvider) throw new LlmGenerationError('LLM provider is temporarily unavailable.','LLM_PROVIDER_UNAVAILABLE',503);
     options.onProviderUsed?.({provider:'test-provider',model:'test-model'});
     if(malformed)return '{bad json';
-    const stage=request.responseSchema.required.includes('requirements')?'requirements':'analysis';
+    const stage=stageFor(request);
     if(nextRawOutput&&(nextRawStage===stage||nextRawStage==='both'))return typeof nextRawOutput==='function'?nextRawOutput(request,stage):nextRawOutput;
-    return stage==='requirements'?requirementOnlyOutputFor(request):analysisOnlyOutputFor(request);
+    return stage==='requirements'?requirementOnlyOutputFor(request):stage==='analysis'?analysisOnlyOutputFor(request):classificationOnlyOutputFor(request);
   }});
   server=app.listen(0,'127.0.0.1'); await new Promise((resolve)=>server.once('listening',resolve));
   baseUrl=`http://127.0.0.1:${server.address().port}/api`;
@@ -143,32 +177,50 @@ after(async()=>{ if(projectId) await pool.query('DELETE FROM projects WHERE id=$
 
 async function run() { return fetch(`${baseUrl}/projects/${projectId}/requirements/intelligence`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({inputId})}); }
 
-test('two structured calls extract and analyze requirements with persisted IDs, evidence, confidence and citations',async()=>{
+test('three structured calls extract, analyze and classify with persisted IDs, exact evidence, and confidence',async()=>{
   calls=0; lastRequests=[]; const beforeInput=(await pool.query('SELECT submitted_content FROM project_inputs WHERE id=$1',[inputId])).rows[0].submitted_content;
   const response=await run(); assert.equal(response.status,200,await response.clone().text());
-  const data=(await response.json()).data; assert.equal(calls,2); assert.equal(data.provider,'test-provider'); assert.equal(data.requirements.length,5);
-  const [extractionRequest,analysisRequest]=lastRequests;
+  const data=(await response.json()).data; assert.equal(calls,3); assert.equal(data.provider,'test-provider'); assert.equal(data.requirements.length,5);
+  const [extractionRequest,analysisRequest,classificationRequest]=lastRequests;
   assert.deepEqual(extractionRequest.responseSchema.required,['requirements']);
   assert.ok(extractionRequest.responseSchema.properties.requirements); assert.equal(extractionRequest.ollamaFormat,undefined);
   const extractedItemSchema=extractionRequest.responseSchema.properties.requirements.items;
-  assert.deepEqual(extractedItemSchema.required,['candidateId','requirementType','confidence']);
+  assert.deepEqual(extractedItemSchema.required,['candidateId','confidence']);
   assert.ok(extractedItemSchema.properties.candidateId);
+  assert.equal(Object.hasOwn(extractedItemSchema.properties,'requirementType'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'key'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'requirementText'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'sourceEvidence'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'sourceEvidenceStart'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'priority'),false);
   assert.equal(Object.hasOwn(extractedItemSchema.properties,'assumptions'),false);
-  assert.ok(extractionRequest.systemPrompt.includes('Return only each selected candidateId, its requirementType, and confidence'));
-  assert.ok(extractionRequest.systemPrompt.includes('Do not return requirementText, sourceEvidence, offsets, canonical requirement IDs, priority, or assumptions'));
+  assert.ok(extractionRequest.systemPrompt.includes('Return only candidateId and extraction confidence'));
+  assert.ok(extractionRequest.systemPrompt.includes('Do not classify requirements'));
+  assert.ok(extractionRequest.systemPrompt.includes('Return only candidateId and extraction confidence'));
   assert.deepEqual(analysisRequest.responseSchema.required,['findings']);
   const findingSchema=analysisRequest.responseSchema.properties.findings.items;
-  assert.deepEqual(Object.keys(findingSchema.properties),['requirementId','findingType','description','severity','clarificationQuestion']);
-  assert.deepEqual(findingSchema.required,['requirementId','findingType','description','severity','clarificationQuestion']);
+  assert.deepEqual(Object.keys(findingSchema.properties),['requirementId','relatedRequirementId','findingType','description','evidenceText','relatedEvidenceText','severity','clarificationQuestion','confidence']);
+  assert.deepEqual(findingSchema.required,['requirementId','findingType','description','evidenceText','severity','clarificationQuestion','confidence']);
   assert.equal(analysisRequest.ollamaFormat,undefined);
-  for(const scaleText of ['decimal JSON number from 0.0 to 1.0','NEVER a percentage','100% = 1.0','90% = 0.9','75% = 0.75','0.0, 0.5, 0.85, 0.95, 1.0','50, 75, 90, 100']) assert.ok(extractionRequest.systemPrompt.includes(scaleText));
+  assert.deepEqual(classificationRequest.responseSchema.required,['classifications']);
+  assert.deepEqual(classificationRequest.responseSchema.properties.classifications.items.properties.requirementId.enum,['N1','N2','N3','N4','N5']);
+  assert.deepEqual(classificationRequest.responseSchema.properties.classifications.items.properties.classification.enum,['functional','non_functional','business_rule','constraint','security','other']);
+  assert.deepEqual(Object.keys(classificationRequest.responseSchema.properties.classifications.items.properties),['requirementId','classification','confidence']);
+  assert.deepEqual(classificationRequest.responseSchema.properties.classifications.items.required,['requirementId','classification','confidence']);
+  assert.deepEqual(classificationRequest.responseSchema.properties.classifications.minItems,5);
+  assert.deepEqual(classificationRequest.responseSchema.properties.classifications.maxItems,5);
+  assert.equal(Object.hasOwn(classificationRequest.responseSchema.properties,'assessments'),false);
+  assert.ok(classificationRequest.systemPrompt.includes('NON_FUNCTIONAL describes a quality attribute'));
+  assert.ok(classificationRequest.systemPrompt.includes('BUSINESS_RULE describes a business policy'));
+  assert.ok(classificationRequest.systemPrompt.includes('SECURITY describes authentication'));
+  assert.ok(classificationRequest.userPrompt.includes('Do not omit, duplicate, or invent requirement IDs'));
+  assert.equal(classificationRequest.userPrompt.includes('retrievedKnowledge'),false);
+  assert.equal(classificationRequest.userPrompt.includes('policy'),false);
+  for(const scaleText of ['decimal number from 0.0 to 1.0','never a percentage','100% = 1.0','90% = 0.9','75% = 0.75','0.0, 0.5, 0.85, 0.95, 1.0','50, 75, 90, 100']) assert.ok(extractionRequest.responseSchema.properties.requirements.items.properties.confidence.description.toLowerCase().includes(scaleText.toLowerCase()));
   assert.match(extractionRequest.responseSchema.properties.requirements.items.properties.confidence.description,/decimal number from 0\.0 to 1\.0, never a percentage/i);
-  for(const instruction of ['identify meaningful source-supported quality, security, privacy, risk, compliance, and clarification issues','Return a single flat findings array','requirementId, findingType, description, severity, and clarificationQuestion','Do not return titles, requirement text, evidence, confidence, offsets, nested objects']) assert.ok(analysisRequest.systemPrompt.includes(instruction),instruction);
+  for(const instruction of ['Analyze each supplied requirement independently for intrinsic issues','compare requirements for direct contradictions and duplicate obligations','relatedRequirementId/relatedEvidenceText','exact requirementText','evidenceText: a short, verbatim, case-sensitive substring','Never transfer an issue between requirements','Do not attach a finding because another requirement shares a domain','Related, dependent, and complementary requirements are not duplicates','If a requirement has no meaningful issue, return no finding','Never say requirement text is missing when it is present','Return a flat findings array']) assert.ok(analysisRequest.systemPrompt.includes(instruction),instruction);
+  assert.deepEqual(Object.keys(analysisRequest.responseSchema.properties.findings.items.properties),['requirementId','relatedRequirementId','findingType','description','evidenceText','relatedEvidenceText','severity','clarificationQuestion','confidence']);
+  assert.ok(analysisRequest.responseSchema.properties.findings.items.required.includes('evidenceText'));
   const analysisContext=JSON.parse(analysisRequest.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
   assert.equal(Object.hasOwn(analysisContext,'existingRequirements'),false);
   const extractionContext=JSON.parse(extractionRequest.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
@@ -176,8 +228,13 @@ test('two structured calls extract and analyze requirements with persisted IDs, 
   assert.equal(Object.hasOwn(extractionContext.input,'text'),false);
   assert.equal(extractionContext.candidates.length,5);
   assert.ok(extractionContext.candidates.every((candidate)=>source.includes(candidate.text)));
-  assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.key),['N1','N2','N3','N4','N5']);
-  assert.ok(analysisContext.input.text.includes('two managers have approved it'));
+  assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.requirementId),['N1','N2','N3','N4','N5']);
+  assert.equal(Object.hasOwn(analysisContext.requirements[0],'requirementType'),false,'Call 2 must not classify requirements');
+  assert.equal(Object.keys(analysisContext).length,1,'Call 2 receives only independent requirement units, not the full source text');
+  assert.ok(analysisContext.requirements.every((requirement)=>requirement.requirementText && requirement.requirementId));
+  const classificationContext=JSON.parse(classificationRequest.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
+  assert.deepEqual(classificationContext.requirements.map((requirement)=>requirement.requirementId),['N1','N2','N3','N4','N5']);
+  assert.deepEqual(Object.keys(classificationContext),['requirements']);
   assert.ok(data.requirements.every((r)=>r.id&&r.sourceInputId===inputId&&r.confidence>=0&&r.confidence<=1&&source.slice(r.sourceEvidenceStart,r.sourceEvidenceEnd)===r.sourceEvidence));
   const conflict=data.findings.find((f)=>f.findingType==='CONFLICT'); assert.equal(conflict.requirementIds.length,2); assert.ok(conflict.requirementIds.every((id)=>data.requirements.some((r)=>r.id===id)));
   const singleRequirementFinding=data.findings.find((finding)=>finding.findingType==='AMBIGUITY'); assert.equal(singleRequirementFinding.requirementIds.length,1); assert.equal(singleRequirementFinding.requirementIds[0],data.requirements[2].id);
@@ -185,16 +242,48 @@ test('two structured calls extract and analyze requirements with persisted IDs, 
   assert.equal(data.analysis.summary.clarificationQuestions.length,3);
   for(const type of ['AMBIGUITY','INCOMPLETENESS','QUALITY','CONFLICT','CLASSIFICATION']) assert.ok(data.analysis.summary.findingsByType[type]>=1);
   assert.equal(data.findings.length,5);
-  const intelligence=data.analysis.summary.intelligence; assert.equal(intelligence.securityPrivacy.length,1); assert.equal(intelligence.risks.length,1);
-  assert.equal(intelligence.securityPrivacy[0].evidenceQuote,data.requirements.find((requirement)=>requirement.id===intelligence.securityPrivacy[0].requirementIds[0]).sourceEvidence);
-  assert.equal(intelligence.risks[0].evidenceQuote,data.requirements.find((requirement)=>requirement.id===intelligence.risks[0].requirementIds[0]).sourceEvidence);
-  assert.ok(intelligence.complianceMappings.length<=1);
-  assert.ok(intelligence.complianceMappings.every((mapping)=>mapping.citation&&mapping.evidenceQuote===mapping.citation.text));
+  assert.deepEqual(data.requirements.map((requirement)=>requirement.requirementType),['BUSINESS_RULE','BUSINESS_RULE','SECURITY','CONSTRAINT','NON_FUNCTIONAL']);
+  assert.ok(data.findings.some((finding)=>finding.confidence!==0.5));
+  assert.equal(data.findings.find((finding)=>finding.findingType==='QUALITY').clarificationQuestion,null);
+  const intelligence=data.analysis.summary.intelligence; assert.deepEqual(intelligence.securityPrivacy,[]); assert.deepEqual(intelligence.risks,[]); assert.deepEqual(intelligence.complianceMappings,[]);
+  assert.ok(Array.isArray(intelligence.knowledgeEvidence));
   assert.equal((await pool.query('SELECT submitted_content FROM project_inputs WHERE id=$1',[inputId])).rows[0].submitted_content,beforeInput);
   const persisted=await pool.query('SELECT provider,model_name,requirement_count,finding_count,summary FROM requirement_analysis_runs WHERE id=$1',[data.analysis.id]);
-  assert.equal(persisted.rows.length,1); assert.equal(persisted.rows[0].requirement_count,5); assert.equal(persisted.rows[0].finding_count,5); assert.ok(persisted.rows[0].summary.intelligence.risks.length);
+  assert.equal(persisted.rows.length,1); assert.equal(persisted.rows[0].requirement_count,5); assert.equal(persisted.rows[0].finding_count,5); assert.deepEqual(persisted.rows[0].summary.intelligence.risks,[]);
   const persistedFinding=await pool.query('SELECT evidence FROM requirement_analysis_findings WHERE id=$1',[conflict.id]);
   assert.deepEqual(persistedFinding.rows[0].evidence,conflict.evidence);
+});
+
+test('Call 2 separates ambiguous wording and needed conditions from implementation choices',async()=>{
+  let analysisRequest;
+  nextRawOutput=(request,stage)=>{
+    if(stage==='requirements')return requirementOnlyOutputFor(request);
+    if(stage==='classification')return classificationOnlyOutputFor(request);
+    analysisRequest=request;
+    const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
+    const fast=context.requirements.find((requirement)=>requirement.requirementText.includes('fast'));
+    return JSON.stringify({findings:[{requirementId:fast.requirementId,findingType:'AMBIGUITY',description:'The term “fast” has no measurable threshold.',evidenceText:'fast',severity:'MEDIUM',clarificationQuestion:'What response-time threshold is required?',confidence:0.9}]});
+  };
+  nextRawStage='both';
+  try {
+    const response=await run();assert.equal(response.status,200,await response.clone().text());
+    const data=(await response.json()).data;
+    assert.equal(data.findings.length,1);
+    assert.equal(data.findings[0].findingType,'AMBIGUITY');
+    assert.deepEqual(data.findings[0].evidence,[{requirementId:data.requirements[4].id,quote:data.requirements[4].sourceEvidence}]);
+    const prompt=analysisRequest.systemPrompt;
+    for(const rule of [
+      'Use AMBIGUITY for vague or unmeasurable wording',
+      'do not label it INCOMPLETENESS solely because no numeric target is stated',
+      'Use INCOMPLETENESS only when information genuinely needed to understand, implement, verify, or test the stated behavior is absent',
+      'necessary actor, trigger/condition, timing, expected outcome, or business constraint',
+      'Testability concerns observable behavior, not implementation choices',
+      'When the requirement already says an actor shall display, record, upload, assign, or maintain something, do not ask how that stated action is implemented',
+      'Do not invent additional notifications, security rules, or other obligations absent from the supplied text',
+      'database technology, programming language, API design, algorithms, internal modules, deployment, framework, hardware, or exact UI details',
+      'Do not infer authentication or other security requirements solely from general engineering best practices',
+    ]) assert.ok(prompt.includes(rule),rule);
+  } finally {nextRawOutput=null;nextRawStage='analysis';}
 });
 
 test('persists and retrieves independent source-scoped requirements and analyses without project-wide context leakage',async()=>{
@@ -207,10 +296,11 @@ test('persists and retrieves independent source-scoped requirements and analyses
   assert.equal((await priorB.json()).data.analysis,null,'source B must not fall back to source A analysis');
   nextRawOutput=(request,stage)=>{
     const context=JSON.parse(request.userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
-    if(stage==='requirements')return JSON.stringify({requirements:[{candidateId:context.candidates[0].candidateId,requirementType:'FUNCTIONAL',confidence:0.9}]});
+    if(stage==='requirements')return JSON.stringify({requirements:[{candidateId:context.candidates[0].candidateId,confidence:0.9}]});
+    if(stage==='classification')return classificationOnlyOutputFor(request);
     return JSON.stringify({findings:[
-      {requirementId:'N1',findingType:'QUALITY',description:'A source-specific review is needed.',severity:'LOW',clarificationQuestion:null},
-      {requirementId:dataFromPriorRun.findingRequirementId,findingType:'AMBIGUITY',description:'Cross-source reference must be discarded.',severity:'MEDIUM',clarificationQuestion:null},
+      {requirementId:'N1',findingType:'QUALITY',description:'A source-specific review is needed.',evidenceText:context.requirements[0].requirementText,severity:'LOW',clarificationQuestion:null,confidence:0.81},
+      {requirementId:dataFromPriorRun.findingRequirementId,findingType:'AMBIGUITY',description:'Cross-source reference must be discarded.',evidenceText:source.slice(0,28),severity:'MEDIUM',clarificationQuestion:null,confidence:0.62},
     ]});
   };
   const sourceAResponse=await fetch(`${baseUrl}/projects/${projectId}/requirements/analysis?sourceInputId=${inputId}`);
@@ -229,7 +319,7 @@ test('persists and retrieves independent source-scoped requirements and analyses
     assert.equal(body.findings.length,1);
     assert.deepEqual(body.findings[0].requirementIds,[body.requirements[0].id]);
     const context=JSON.parse(lastRequests[1].userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
-    assert.deepEqual(context.requirements.map((requirement)=>requirement.key),['N1']);
+    assert.deepEqual(context.requirements.map((requirement)=>requirement.requirementId),['N1']);
     const requirementsA=await fetch(`${baseUrl}/projects/${projectId}/requirements?sourceInputId=${inputId}`);
     const requirementsB=await fetch(`${baseUrl}/projects/${projectId}/requirements?sourceInputId=${sourceBId}`);
     assert.ok((await requirementsA.json()).data.every((requirement)=>requirement.sourceInputId===inputId));
@@ -252,6 +342,7 @@ test('repeat operation replaces selected-input candidates without duplicates',as
 test('candidate IDs produce exact backend-owned requirements and duplicate selections are deduplicated',async()=>{
   nextRawOutput=(request,stage)=>{
     if(stage==='analysis')return JSON.stringify({findings:[]});
+    if(stage==='classification')return classificationOnlyOutputFor(request);
     const selections=JSON.parse(requirementOnlyOutputFor(request)).requirements;
     return JSON.stringify({requirements:[...selections.slice(0,4),selections[0]]});
   };
@@ -261,13 +352,70 @@ test('candidate IDs produce exact backend-owned requirements and duplicate selec
     const data=(await response.json()).data;
     const extractionContext=JSON.parse(lastRequests[0].userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
     const analysisContext=JSON.parse(lastRequests[1].userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
-    assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.key),['N1','N2','N3','N4']);
+    assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.requirementId),['N1','N2','N3','N4']);
     assert.equal(data.requirements.length,4);
     assert.equal(new Set(data.requirements.map((requirement)=>requirement.requirementText)).size,4);
     assert.deepEqual(data.requirements.map((requirement)=>requirement.requirementText),extractionContext.candidates.slice(0,4).map((candidate)=>candidate.text));
     assert.ok(data.requirements.every((requirement)=>requirement.sourceEvidence===requirement.requirementText&&source.slice(requirement.sourceEvidenceStart,requirement.sourceEvidenceEnd)===requirement.sourceEvidence));
     assert.ok(data.findings.every((finding)=>finding.requirementIds.every((id)=>data.requirements.some((requirement)=>requirement.id===id))));
   } finally { nextRawOutput=null; nextRawStage='analysis'; }
+});
+
+test('invalid Call 3 source IDs fail atomically without replacing the last successful result',async()=>{
+  const prior=(await fetch(`${baseUrl}/projects/${projectId}/requirements/analysis?sourceInputId=${inputId}`)).json();
+  const priorData=(await prior).data;
+  const priorRequirements=(await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id);
+  const priorFindings=(await pool.query('SELECT id FROM requirement_analysis_findings WHERE analysis_run_id=$1 ORDER BY id',[priorData.analysis.id])).rows.map((row)=>row.id);
+  nextRawOutput=(request,stage)=>{
+    if(stage==='analysis')return JSON.stringify({findings:[]});
+    if(stage==='classification'){
+      const result=JSON.parse(classificationOnlyOutputFor(request));
+      result.classifications[0].requirementId='foreign-source-requirement';
+      return JSON.stringify(result);
+    }
+    return requirementOnlyOutputFor(request);
+  };
+  nextRawStage='both'; calls=0;
+  try {
+    const response=await run();
+    assert.equal(response.status,502);
+    assert.equal((await response.json()).error.code,'INVALID_ANALYSIS_OUTPUT');
+  } finally {nextRawOutput=null;nextRawStage='analysis';}
+  assert.equal(calls,3,'the failure must occur during Call 3 validation');
+  assert.deepEqual((await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id),priorRequirements);
+  assert.equal((await pool.query('SELECT id FROM requirement_analysis_runs WHERE project_id=$1 AND source_input_id=$2 ORDER BY created_at DESC LIMIT 1',[projectId,inputId])).rows[0]?.id,priorData.analysis.id);
+  assert.deepEqual((await pool.query('SELECT id FROM requirement_analysis_findings WHERE analysis_run_id=$1 ORDER BY id',[priorData.analysis.id])).rows.map((row)=>row.id),priorFindings);
+});
+
+test('Call 3 rejects missing, duplicate, foreign, invalid, or extra classification fields atomically',async()=>{
+  nextRawOutput=null; nextRawStage='analysis';
+  const seed=await run(); assert.equal(seed.status,200,await seed.clone().text());
+  const priorData=(await (await fetch(`${baseUrl}/projects/${projectId}/requirements/analysis?sourceInputId=${inputId}`)).json()).data;
+  const priorRequirements=(await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id);
+  const invalidMutations=[
+    (out)=>{out.classifications.pop();},
+    (out)=>{out.classifications[1].requirementId=out.classifications[0].requirementId;},
+    (out)=>{out.classifications[0].requirementId='foreign-requirement-id';},
+    (out)=>{out.classifications[0].classification='unspecified';},
+    (out)=>{out.classifications[0].confidence=100;},
+    (out)=>{out.classifications[0].confidence='0.9';},
+    (out)=>{out.classifications[0].requirementText='untrusted text';},
+    (out)=>{out.assessments=[];},
+  ];
+  for(const mutate of invalidMutations){
+    nextRawOutput=(request,stage)=>{
+      if(stage==='requirements')return requirementOnlyOutputFor(request);
+      if(stage==='analysis')return JSON.stringify({findings:[]});
+      const output=JSON.parse(classificationOnlyOutputFor(request)); mutate(output); return JSON.stringify(output);
+    };
+    nextRawStage='both';
+    try {
+      const response=await run(); assert.equal(response.status,502,await response.clone().text());
+      assert.equal((await response.json()).error.code,'INVALID_ANALYSIS_OUTPUT');
+    } finally {nextRawOutput=null;nextRawStage='analysis';}
+    assert.equal((await pool.query('SELECT id FROM requirement_analysis_runs WHERE project_id=$1 AND source_input_id=$2 ORDER BY created_at DESC LIMIT 1',[projectId,inputId])).rows[0]?.id,priorData.analysis.id);
+    assert.deepEqual((await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id),priorRequirements);
+  }
 });
 
 test('Call 1 rejects unknown candidate IDs without replacing the previous successful result',async()=>{
@@ -311,23 +459,30 @@ test('scopes Call 2 to the selected input and discards findings referencing anot
     assert.ok(data.findings.every((finding)=>finding.requirementIds.every((id)=>data.requirements.some((requirement)=>requirement.id===id))));
     const analysisContext=JSON.parse(lastRequests[1].userPrompt.match(/<context>([\s\S]*)<\/context>/)[1]);
     assert.equal(Object.hasOwn(analysisContext,'existingRequirements'),false);
-    assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.key),['N1','N2','N3','N4','N5']);
-    assert.equal(analysisContext.requirements.some((requirement)=>requirement.key===existingId),false);
+    assert.deepEqual(analysisContext.requirements.map((requirement)=>requirement.requirementId),['N1','N2','N3','N4','N5']);
+    assert.equal(analysisContext.requirements.some((requirement)=>requirement.requirementId===existingId),false);
     assert.equal(data.requirements.length,5);
   } finally { nextRawOutput=null; nextRawStage='analysis'; }
 });
 
-test('constructs and persists compliance mapping only from retrieved knowledge grounded in the selected requirement',async()=>{
+test('retains source-scoped retrieved knowledge while keeping Call 3 classification-only',async()=>{
   const data=await runWithKnowledge();
-  const savedMapping=data.analysis.summary.intelligence.complianceMappings[0];
   assert.equal(data.analysis.status,'COMPLETED');
-  assert.deepEqual(savedMapping.requirementIds,[data.requirements[3].id]);
-  assert.equal(savedMapping.citation.chunkId,citationChunkId);
-  assert.equal(savedMapping.evidenceQuote,citationChunkText);
+  assert.deepEqual(data.analysis.summary.intelligence.complianceMappings,[]);
+  assert.deepEqual(data.analysis.summary.intelligence.securityPrivacy,[]);
+  assert.deepEqual(data.analysis.summary.intelligence.risks,[]);
+  assert.equal(data.analysis.summary.intelligence.knowledgeEvidence[0].chunkId,citationChunkId);
+  assert.equal(data.analysis.summary.intelligence.knowledgeEvidence[0].text,citationChunkText);
   const persisted=await pool.query('SELECT summary FROM requirement_analysis_runs WHERE id=$1',[data.analysis.id]);
   assert.equal(persisted.rows.length,1);
-  assert.equal(persisted.rows[0].summary.intelligence.complianceMappings[0].citation.chunkId,citationChunkId);
-  assert.equal(persisted.rows[0].summary.intelligence.complianceMappings[0].evidenceQuote,citationChunkText);
+  assert.deepEqual(persisted.rows[0].summary.intelligence.complianceMappings,[]);
+  assert.equal(persisted.rows[0].summary.intelligence.knowledgeEvidence[0].chunkId,citationChunkId);
+});
+
+test('does not generate policy mappings from non-authoritative demo knowledge',async()=>{
+  const data=await runWithKnowledge('DEMO / NON-AUTHORITATIVE',['demo','non-authoritative']);
+  assert.deepEqual(data.analysis.summary.intelligence.complianceMappings,[]);
+  assert.equal(data.analysis.summary.intelligence.knowledgeEvidence[0].authority,'DEMO / NON-AUTHORITATIVE');
 });
 
 test('Call 2 discards finding references that do not identify canonical or existing requirements',async()=>{
@@ -340,7 +495,7 @@ test('Call 2 discards finding references that do not identify canonical or exist
     const data=(await response.json()).data;
     assert.ok(data.findings.every((finding)=>finding.requirementIds.every((id)=>data.requirements.some((requirement)=>requirement.id===id))));
   } finally { nextRawOutput=null; nextRawStage='analysis'; }
-  assert.equal(calls,2,'Call 2 reference validation follows successful canonicalization in Call 1');
+  assert.equal(calls,3,'Call 2 references and Call 3 classifications are validated against Call 1 canonicalized requirements');
 });
 
 test('Call 2 ignores model requirement text and attaches authoritative text and evidence by requirementId',async()=>{
@@ -358,14 +513,74 @@ test('Call 2 ignores model requirement text and attaches authoritative text and 
   finally { nextRawOutput=null; nextRawStage='analysis'; }
 });
 
+test('Call 2 discards impossible missing-requirement-text claims but retains concrete missing-specification findings',async()=>{
+  nextRawOutput=(request,stage)=>stage==='requirements'?requirementOnlyOutputFor(request):stage==='analysis'?JSON.stringify({findings:[
+    {requirementId:'N1',findingType:'INCOMPLETENESS',description:'Requirement text is missing from the source.',evidenceText:'approve every loan',severity:'MEDIUM',clarificationQuestion:'Can the requirement text be supplied?',confidence:0.92},
+    {requirementId:'N4',findingType:'INCOMPLETENESS',description:'The retention duration is unspecified, so the record lifecycle cannot be tested.',evidenceText:'appropriate period',severity:'MEDIUM',clarificationQuestion:'What retention duration applies?',confidence:0.88},
+  ]}):classificationOnlyOutputFor(request);
+  nextRawStage='both';
+  try {
+    const response=await run(); assert.equal(response.status,200,await response.clone().text());
+    const data=(await response.json()).data;
+    assert.equal(data.findings.length,1);
+    assert.equal(data.findings[0].description,'The retention duration is unspecified, so the record lifecycle cannot be tested.');
+    assert.deepEqual(data.findings[0].requirementIds,[data.requirements[3].id]);
+    assert.deepEqual(data.findings[0].evidence,[{requirementId:data.requirements[3].id,quote:data.requirements[3].sourceEvidence}]);
+  } finally {nextRawOutput=null;nextRawStage='analysis';}
+});
+
+test('Call 2 accepts only evidenceText owned by the referenced requirement and never reassigns findings',async()=>{
+  const candidateTexts=buildRequirementCandidates(source,inputId).map(({text})=>text);
+  nextRawOutput=(request,stage)=>stage==='requirements'?requirementOnlyOutputFor(request):stage==='analysis'?JSON.stringify({findings:[
+    {requirementId:'N1',findingType:'AMBIGUITY',description:'The manager review condition needs clarification.',evidenceText:'after a manager reviews it',severity:'MEDIUM',clarificationQuestion:'What manager review condition applies?',confidence:0.9},
+    {requirementId:'N1',findingType:'INCOMPLETENESS',description:'Two approvals are required.',evidenceText:'two managers have approved it',severity:'HIGH',clarificationQuestion:null,confidence:0.9},
+    {requirementId:'N1',findingType:'QUALITY',description:'Authentication is unspecified.',evidenceText:'authenticate securely',severity:'LOW',clarificationQuestion:null,confidence:0.8},
+    {requirementId:'N2',findingType:'INCOMPLETENESS',description:'The approval condition lacks a criterion.',evidenceText:'two managers have approved it',severity:'MEDIUM',clarificationQuestion:null,confidence:0.85},
+  ]}):classificationOnlyOutputFor(request);
+  nextRawStage='both';
+  try {
+    const response=await run(); assert.equal(response.status,200,await response.clone().text());
+    const data=(await response.json()).data;
+    assert.equal(data.findings.length,2);
+    assert.deepEqual(data.findings.map((finding)=>finding.requirementIds[0]).sort(),[data.requirements[0].id,data.requirements[1].id].sort());
+    assert.ok(data.findings.every((finding)=>finding.evidence.every((entry)=>data.requirements.find((requirement)=>requirement.id===entry.requirementId).requirementText.includes(entry.quote))));
+    assert.equal(data.requirements[0].requirementText,candidateTexts[0]);
+    assert.equal(data.requirements[1].requirementText,candidateTexts[1]);
+  } finally {nextRawOutput=null;nextRawStage='analysis';}
+});
+
+test('Call 2 combines duplicate relationship findings only across current supplied requirement IDs',async()=>{
+  const candidateTexts=buildRequirementCandidates(source,inputId).map(({text})=>text);
+  const evidence=(key)=>candidateTexts[Number(key.slice(1))-1];
+  nextRawOutput=(request,stage)=>stage==='requirements'?requirementOnlyOutputFor(request):stage==='analysis'?JSON.stringify({findings:[
+    {requirementId:'N1',relatedRequirementId:'N3',findingType:'CONSISTENCY',description:'These requirements substantially repeat the same obligation.',evidenceText:evidence('N1'),relatedEvidenceText:evidence('N3'),severity:'LOW',clarificationQuestion:null,confidence:0.82},
+    {requirementId:'N3',relatedRequirementId:'N1',findingType:'CONSISTENCY',description:'A duplicate obligation is present across these statements.',evidenceText:evidence('N3'),relatedEvidenceText:evidence('N1'),severity:'LOW',clarificationQuestion:null,confidence:0.8},
+    {requirementId:'N1',relatedRequirementId:'N2',findingType:'CONFLICT',description:'These approval rules have incompatible manager-count conditions.',evidenceText:evidence('N1'),relatedEvidenceText:evidence('N2'),severity:'HIGH',clarificationQuestion:'Should one manager or two managers be required?',confidence:0.9},
+  ]}):classificationOnlyOutputFor(request);
+  nextRawStage='both';
+  try {
+    const response=await run(); assert.equal(response.status,200,await response.clone().text());
+    const data=(await response.json()).data;
+    assert.equal(data.findings.length,2);
+    const duplicate=data.findings.find((finding)=>finding.description==='These requirements substantially repeat the same obligation.');
+    assert.deepEqual(duplicate.requirementIds,[data.requirements[0].id,data.requirements[2].id]);
+    assert.ok(duplicate.requirementIds.every((id)=>data.requirements.some((requirement)=>requirement.id===id)));
+    assert.deepEqual(duplicate.evidence,duplicate.requirementIds.map((requirementId)=>({requirementId,quote:data.requirements.find((requirement)=>requirement.id===requirementId).sourceEvidence})));
+    const conflict=data.findings.find((finding)=>finding.findingType==='CONFLICT');
+    assert.deepEqual(conflict.requirementIds,[data.requirements[0].id,data.requirements[1].id]);
+    assert.deepEqual(conflict.evidence,conflict.requirementIds.map((requirementId)=>({requirementId,quote:data.requirements.find((requirement)=>requirement.id===requirementId).sourceEvidence})));
+  } finally {nextRawOutput=null;nextRawStage='analysis';}
+});
+
 test('Call 2 emits only flat semantic fields and discards malformed or cross-source findings without failing the run',async()=>{
   const requirements=JSON.parse(requirementOnlyOutputFor({userPrompt:`<context>${JSON.stringify({candidates:buildRequirementCandidates(source,inputId).map(({candidateId,text})=>({candidateId,text}))})}</context>`})).requirements;
   const first=buildRequirementCandidates(source,inputId)[0];
-  nextRawOutput=(request,stage)=>stage==='requirements'?JSON.stringify({requirements}):JSON.stringify({findings:[
-    {requirementId:'N1',findingType:'QUALITY',description:'This criterion is not measurable.',severity:'LOW',clarificationQuestion:{unexpected:true}},
-    {requirementId:'foreign-input-requirement',findingType:'AMBIGUITY',description:'Must be discarded.',severity:'MEDIUM',clarificationQuestion:null},
-    {requirementId:'N2',findingType:'AMBIGUITY',description:'Valid finding remains.',severity:'MEDIUM',clarificationQuestion:null},
-  ]});
+  const evidenceById=new Map(buildRequirementCandidates(source,inputId).map((requirement,index)=>[`N${index+1}`,requirement.text]));
+  nextRawOutput=(request,stage)=>stage==='requirements'?JSON.stringify({requirements}):stage==='analysis'?JSON.stringify({findings:[
+    {requirementId:'N1',findingType:'QUALITY',description:'This criterion is not measurable.',evidenceText:evidenceById.get('N1'),severity:'LOW',clarificationQuestion:{unexpected:true},confidence:0.7},
+    {requirementId:'foreign-input-requirement',findingType:'AMBIGUITY',description:'Must be discarded.',evidenceText:'The applicant must provide',severity:'MEDIUM',clarificationQuestion:null,confidence:0.8},
+    {requirementId:'N2',findingType:'AMBIGUITY',description:'Valid finding remains.',evidenceText:evidenceById.get('N2'),severity:'MEDIUM',clarificationQuestion:null,confidence:0.84},
+  ]}):classificationOnlyOutputFor(request);
   nextRawStage='both';
   try {
     const response=await run(); assert.equal(response.status,200,await response.clone().text());
@@ -408,7 +623,7 @@ test('provider failure and malformed output do not create fake findings or repla
 test('invalid candidate confidence logs a safe field-specific diagnostic without source text',async()=>{
   const candidate=buildRequirementCandidates(source,inputId)[0];
   const before=(await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id);
-  nextRawOutput=JSON.stringify({requirements:[{candidateId:candidate.candidateId,requirementType:'FUNCTIONAL',confidence:'not-a-number'}]}); nextRawStage='requirements'; calls=0; lastRequests=[];
+  nextRawOutput=JSON.stringify({requirements:[{candidateId:candidate.candidateId,confidence:'not-a-number'}]}); nextRawStage='requirements'; calls=0; lastRequests=[];
   const originalWarn=console.warn; let diagnostic;
   console.warn=(message,details)=>{if(message==='Requirements Intelligence output rejected.')diagnostic=details;};
   try {
@@ -416,7 +631,7 @@ test('invalid candidate confidence logs a safe field-specific diagnostic without
     assert.equal(response.status,502);
     assert.equal((await response.json()).error.code,'INVALID_ANALYSIS_OUTPUT');
   } finally { nextRawOutput=null; nextRawStage='analysis'; console.warn=originalWarn; }
-  assert.equal(calls,1,'Call 1 validation failure must prevent Call 2');
+  assert.equal(calls,1,'Call 1 validation failure must prevent later stages');
   assert.deepEqual((await pool.query('SELECT id FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2 ORDER BY id',[projectId,inputId])).rows.map((row)=>row.id),before);
   assert.equal(diagnostic.diagnosticReason,'REQUIREMENT_CANDIDATE_CONFIDENCE');
   assert.deepEqual(diagnostic.diagnosticDetail,{field:'confidence',selectionIndex:0,validationReason:'must be a JSON number from 0 to 1'});

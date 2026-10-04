@@ -23,7 +23,7 @@ function requestErrorMessage(error) {
 }
 
 function humanize(value) {
-  return value.toLowerCase().replaceAll('_', ' ');
+  return value.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().replaceAll('_', ' ');
 }
 
 export default function ProjectRequirements({ projectId }) {
@@ -37,6 +37,8 @@ export default function ProjectRequirements({ projectId }) {
   const [notice, setNotice] = useState('');
   const [intelligence, setIntelligence] = useState(null);
   const [findings, setFindings] = useState([]);
+  const [sdlc, setSdlc] = useState(null);
+  const [sdlcBusy, setSdlcBusy] = useState(false);
   const resultRequest = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -59,6 +61,8 @@ export default function ProjectRequirements({ projectId }) {
   }, [projectId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => { api.projectSdlc(projectId).then(setSdlc).catch(() => setSdlc(null)); }, [projectId]);
 
   useEffect(() => {
     const requestId=++resultRequest.current;
@@ -106,10 +110,31 @@ export default function ProjectRequirements({ projectId }) {
     }
   }
 
+  async function reviewRequirement(requirement, status) {
+    try {
+      const requirementText = status === 'MODIFIED' ? window.prompt('Edit the requirement wording. Original source evidence is preserved.', requirement.requirementText) : undefined;
+      if (status === 'MODIFIED' && (requirementText === null || !requirementText.trim())) return;
+      const saved = await api.reviewRequirement(requirement.id, { status, ...(requirementText !== undefined ? { requirementText } : {}) });
+      setRequirements((current) => current.map((item) => item.id === requirement.id ? { ...item, reviewStatus: status, ...(status === 'MODIFIED' ? { requirementText: saved.requirementText } : {}) } : item));
+    } catch (requestError) { setError(requestError.message); }
+  }
+
+  async function runSdlc() {
+    setSdlcBusy(true); setError('');
+    try { setSdlc(await api.runSdlc(projectId)); }
+    catch (requestError) { setError(requestError.message); }
+    finally { setSdlcBusy(false); }
+  }
+
+  async function reviewSdlc(status) {
+    try { setSdlc(await api.reviewSdlc(sdlc.id, { status })); }
+    catch (requestError) { setError(requestError.message); }
+  }
+
   return (
     <section className="requirements-section">
       <div className="input-section-heading">
-        <div><span className="eyebrow">AGENT 1 · REQUIREMENTS INTELLIGENCE</span><h2>Requirements Intelligence</h2><p>Extract and review requirements from a READY input in one bounded model request.</p></div>
+        <div><span className="eyebrow">AGENT 1 · REQUIREMENTS INTELLIGENCE</span><h2>Requirements Intelligence</h2><p>Run structured extraction, quality analysis, classification, and knowledge retrieval for a READY input.</p></div>
       </div>
       <div className="requirements-extract-bar">
         {loading ? <span className="state-message">Loading READY inputs and candidate requirements…</span> : inputs.length ? <>
@@ -131,10 +156,11 @@ export default function ProjectRequirements({ projectId }) {
         {!!intelligence.summary.clarificationQuestions.length && <div className="analysis-questions"><h3>Clarification questions</h3><ul>{intelligence.summary.clarificationQuestions.map((item) => <li key={item.findingId}>{item.question}</li>)}</ul></div>}
         {!!findings.length && <div className="analysis-findings">{findings.map((finding) => <article className="analysis-finding" key={finding.id}><header><div><span className="eyebrow">{humanize(finding.findingType)} · confidence {(finding.confidence * 100).toFixed(0)}%</span><h3>{finding.title}</h3></div><span className="analysis-severity">{humanize(finding.severity)}</span></header><p className="analysis-description">{finding.description}</p>{finding.evidence.map((evidence) => <blockquote className="requirement-evidence" key={`${evidence.requirementId}-${evidence.quote}`}><small>Requirement {evidence.requirementId}</small>{evidence.quote}</blockquote>)}{finding.clarificationQuestion && <p><strong>Question:</strong> {finding.clarificationQuestion}</p>}</article>)}</div>}
         {intelligence.summary.intelligence && <>
-          <div className="analysis-counts"><span>Security/privacy: {intelligence.summary.intelligence.securityPrivacy.length}</span><span>Risks: {intelligence.summary.intelligence.risks.length}</span><span>Policy mappings: {intelligence.summary.intelligence.complianceMappings.length}</span><span>Retrieved knowledge sources: {intelligence.summary.intelligence.knowledgeEvidence.length || 'No supporting knowledge-base evidence found.'}</span></div>
-          {[...intelligence.summary.intelligence.securityPrivacy,...intelligence.summary.intelligence.risks].map((item,index)=><article className="analysis-finding" key={`${item.title}-${index}`}><header><div><span className="eyebrow">{humanize(item.category || 'RISK')} · confidence {(item.confidence*100).toFixed(0)}%</span><h3>{item.title}</h3></div></header><p className="analysis-description">{item.observation}</p>{item.evidenceQuote&&<blockquote className="requirement-evidence">{item.evidenceQuote}</blockquote>}</article>)}
+          <div className="analysis-counts"><span>Retrieved knowledge sources: {intelligence.summary.intelligence.knowledgeEvidence.length || 'No supporting knowledge-base evidence found.'}</span></div>
+          {!!intelligence.summary.intelligence.knowledgeEvidence.length && <div className="analysis-findings">{intelligence.summary.intelligence.knowledgeEvidence.map((item) => <article className="analysis-finding" key={item.chunkId}><header><div><span className="eyebrow">RETRIEVED KNOWLEDGE · separate from source requirements</span><h3>{item.title}</h3></div><span className="analysis-severity">Similarity {(item.similarity * 100).toFixed(0)}%</span></header><p>{item.text}</p><small>Document {item.documentId} · {item.source} · Authority metadata: {item.authority || 'Unspecified'} · {item.documentType || 'Unspecified type'}</small></article>)}</div>}
+          {[...intelligence.summary.intelligence.securityPrivacy,...intelligence.summary.intelligence.risks].filter((item)=>!findings.some((finding)=>finding.title===item.title&&finding.description===item.observation)).map((item,index)=><article className="analysis-finding" key={`${item.title}-${index}`}><header><div><span className="eyebrow">{humanize(item.category || 'RISK')} · confidence {(item.confidence*100).toFixed(0)}%</span><h3>{item.title}</h3></div></header><p className="analysis-description">{item.observation}</p>{item.evidenceQuote&&<blockquote className="requirement-evidence">{item.evidenceQuote}</blockquote>}</article>)}
         </>}
-        {!!intelligence.summary.intelligence?.complianceMappings.length && <div className="analysis-findings">{intelligence.summary.intelligence.complianceMappings.map((mapping, index) => <article className="analysis-finding" key={index}><h3>{mapping.title}</h3><p>{mapping.observation}</p>{mapping.citation && <blockquote className="requirement-evidence"><strong>{mapping.citation.title}</strong> · {mapping.citation.source}<br />{mapping.evidenceQuote}</blockquote>}<small>Confidence {(mapping.confidence * 100).toFixed(0)}% · Demo/non-authoritative unless source metadata says otherwise</small></article>)}</div>}
+          {!!intelligence.summary.intelligence?.complianceMappings.filter((mapping)=>!findings.some((finding)=>finding.title===mapping.title&&finding.description===mapping.observation)).length && <div className="analysis-findings">{intelligence.summary.intelligence.complianceMappings.filter((mapping)=>!findings.some((finding)=>finding.title===mapping.title&&finding.description===mapping.observation)).map((mapping, index) => <article className="analysis-finding" key={index}><h3>{mapping.title}</h3><p>{mapping.observation}</p>{mapping.citation && <blockquote className="requirement-evidence"><strong>{mapping.citation.title}</strong> · {mapping.citation.source}<br />{mapping.evidenceQuote}</blockquote>}<small>Confidence {(mapping.confidence * 100).toFixed(0)}% · Authority metadata: {mapping.citation?.authority || 'Unspecified'} · Retrieved material does not establish a binding conclusion.</small></article>)}</div>}
       </section>}
       {!!requirements.length && <div className="requirements-list">{requirements.filter((requirement)=>requirement.sourceInputId===inputId).map((requirement) => <article className="requirement-card" key={requirement.id}>
         <header><span className="eyebrow">{humanize(requirement.requirementType)}</span><span className="requirement-confidence">Extraction confidence · {(requirement.confidence * 100).toFixed(0)}%</span></header>
@@ -148,7 +174,11 @@ export default function ProjectRequirements({ projectId }) {
         </dl>
         <blockquote className="requirement-evidence"><span>Source evidence</span>{requirement.sourceEvidence}</blockquote>
         <div className="requirement-assumptions"><strong>Assumptions</strong>{requirement.assumptions.length ? <ul>{requirement.assumptions.map((assumption, index) => <li key={`${requirement.id}-${index}`}>{assumption}</li>)}</ul> : <span>None recorded</span>}</div>
+        <div className="review-controls"><strong>Human review · {humanize(requirement.reviewStatus || 'DRAFT')}</strong><button type="button" onClick={() => reviewRequirement(requirement, 'REVIEWED')}>Mark reviewed</button><button type="button" onClick={() => reviewRequirement(requirement, 'APPROVED')}>Approve</button><button type="button" onClick={() => reviewRequirement(requirement, 'REJECTED')}>Reject</button><button type="button" onClick={() => reviewRequirement(requirement, 'MODIFIED')}>Modify</button></div>
       </article>)}</div>}
+      {!!requirements.length && <section className="analysis-section sdlc-section"><span className="eyebrow">AGENT 2 · SDLC + DOCUMENTATION</span><h3>Project delivery recommendation</h3><p>Approve source-linked requirements first. Deterministic factor scoring ranks delivery approaches; the configured LLM selects relevant computed factors for the explanation. Generated artefacts remain drafts until reviewed.</p><button className="button button-primary" type="button" onClick={runSdlc} disabled={sdlcBusy || !requirements.some((item) => item.reviewStatus === 'APPROVED')}>{sdlcBusy ? 'Analyzing…' : 'Run SDLC + documentation analysis'}</button>
+        {sdlc && <div className="sdlc-result"><h4>{humanize(sdlc.recommendation)} · {humanize(sdlc.status)}</h4><p>{sdlc.explanation}</p><h4>Ranking</h4><ol>{sdlc.ranking.map((item) => <li key={item.method}>{humanize(item.method)} · score {item.score}</li>)}</ol><h4>Scored factors</h4><dl className="requirement-metadata">{Object.entries(sdlc.factors).map(([factor,value]) => <div key={factor}><dt>{humanize(factor)}</dt><dd>{value}/5</dd></div>)}</dl><h4>Workflow</h4><ol>{sdlc.workflow.map((item) => <li key={item.order}>{item.activity}</li>)}</ol><h4>Generated artefacts</h4>{sdlc.artefacts.map((item) => <details key={item.type}><summary>{item.title} · {humanize(item.status)}</summary><pre>{item.content}</pre></details>)}<div className="review-controls"><button type="button" onClick={() => reviewSdlc('REVIEWED')}>Mark reviewed</button><button type="button" onClick={() => reviewSdlc('APPROVED')}>Approve recommendation and artefacts</button><button type="button" onClick={() => reviewSdlc('REJECTED')}>Reject</button></div></div>}
+      </section>}
     </section>
   );
 }

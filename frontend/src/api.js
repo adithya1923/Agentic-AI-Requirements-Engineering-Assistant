@@ -58,4 +58,8 @@ export const api = {
   projectRequirementAnalysis: (projectId, sourceInputId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analysis?sourceInputId=${encodeURIComponent(sourceInputId)}`),
   analyzeRequirements: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/requirements/analyze`, { method: 'POST' }),
   requirementAnalysis: (id) => request(`/requirements/${encodeURIComponent(id)}/analysis`),
+  reviewRequirement: (id, body) => request(`/requirements/${encodeURIComponent(id)}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
+  projectSdlc: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/sdlc`),
+  runSdlc: (projectId) => request(`/projects/${encodeURIComponent(projectId)}/sdlc`, { method: 'POST' }),
+  reviewSdlc: (id, body) => request(`/sdlc/${encodeURIComponent(id)}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
 };

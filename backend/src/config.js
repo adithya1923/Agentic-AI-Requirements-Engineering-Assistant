@@ -28,6 +28,7 @@ export const config = {
     maxChunkChars: Number(process.env.KB_MAX_CHUNK_CHARS || 1200),
     chunkOverlapChars: Number(process.env.KB_CHUNK_OVERLAP_CHARS || 150),
     maxSearchTopK: Number(process.env.KB_MAX_SEARCH_TOP_K || 20),
+    minSimilarity: Math.max(0, Math.min(1, Number(process.env.KB_MIN_SIMILARITY || 0.34))),
   },
   generation: {
     provider: generationProvider,
@@ -39,7 +40,7 @@ export const config = {
     groqApiKey: process.env.GROQ_API_KEY || '',
     groqBaseUrl: (process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
     groqModel: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
-    timeoutMillis: Number(process.env.OLLAMA_GENERATION_TIMEOUT_MS || 120_000),
+    timeoutMillis: Number(process.env.LLM_GENERATION_TIMEOUT_MS || process.env.OLLAMA_GENERATION_TIMEOUT_MS || 120_000),
     retryAttempts: Math.max(1, Math.min(3, Number(process.env.LLM_GENERATION_RETRY_ATTEMPTS || 2))),
     retryMaxDelayMillis: Math.max(0, Math.min(3000, Number(process.env.LLM_GENERATION_RETRY_MAX_DELAY_MS || 1500))),
     providerHealthCacheMillis: Math.max(0, Math.min(120_000, Number(process.env.LLM_PROVIDER_HEALTH_CACHE_MS || 45_000))),
