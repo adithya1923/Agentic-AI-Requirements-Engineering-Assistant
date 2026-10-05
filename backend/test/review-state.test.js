@@ -20,6 +20,11 @@ test('PostgreSQL review transitions persist source evidence and stale dependent 
     VALUES($1,'STAKEHOLDER_STATEMENT','Review fixture input','Automated regression test',$2,'READY',$3) RETURNING id`, [projectId, originalText, '00000000-0000-4000-8000-000000000001'])).rows[0];
   const requirement = (await pool.query(`INSERT INTO candidate_requirements(project_id,source_input_id,requirement_text,requirement_type,source_evidence,source_evidence_start,source_evidence_end,confidence,extraction_status)
     VALUES($1,$2,$3,'FUNCTIONAL',$3,$4,$5,0.95,'COMPLETED') RETURNING id`, [projectId, input.id, sourceEvidence, sourceStart, sourceStart + sourceEvidence.length])).rows[0];
+  const secondText = 'The account service shall retain a verification audit record.';
+  const secondInput = (await pool.query(`INSERT INTO project_inputs(project_id,input_type,title,source,submitted_content,processing_status,created_by)
+    VALUES($1,'MEETING_NOTES','Second project source','Automated regression test',$2,'READY',$3) RETURNING id`, [projectId, secondText, '00000000-0000-4000-8000-000000000001'])).rows[0];
+  const secondRequirement = (await pool.query(`INSERT INTO candidate_requirements(project_id,source_input_id,requirement_text,requirement_type,source_evidence,source_evidence_start,source_evidence_end,confidence,extraction_status)
+    VALUES($1,$2,$3,'FUNCTIONAL',$3,0,length($3),0.92,'COMPLETED') RETURNING id`, [projectId, secondInput.id, secondText])).rows[0];
   const unrelatedInput = (await pool.query(`INSERT INTO project_inputs(project_id,input_type,title,source,submitted_content,processing_status,created_by)
     VALUES($1,'STAKEHOLDER_STATEMENT','Isolation fixture input','Automated regression test','A payment instruction shall retain its own source evidence.','READY',$2) RETURNING id`, [unrelatedProject.id, '00000000-0000-4000-8000-000000000001'])).rows[0];
   await pool.query(`INSERT INTO candidate_requirements(project_id,source_input_id,requirement_text,requirement_type,source_evidence,source_evidence_start,source_evidence_end,confidence,extraction_status,review_status)
@@ -52,8 +57,9 @@ test('PostgreSQL review transitions persist source evidence and stale dependent 
 
   const approved = await review('APPROVED');
   assert.equal(approved.reviewStatus, 'APPROVED');
+  await pool.query("UPDATE candidate_requirements SET review_status='APPROVED' WHERE id=$1", [secondRequirement.id]);
   const analysis = await createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation });
-  assert.deepEqual(analysis.requirementIds, [requirement.id]);
+  assert.deepEqual(new Set(analysis.requirementIds), new Set([requirement.id, secondRequirement.id]));
   assert.equal(analysis.isStale, false);
 
   const modifiedText = 'The account service shall show the verification outcome, pending reason, and next action.';
@@ -74,13 +80,15 @@ test('PostgreSQL review transitions persist source evidence and stale dependent 
   const modifiedDependency = (await staleAfterModify.json()).data;
   assert.equal(modifiedDependency.id, analysis.id);
   assert.equal(modifiedDependency.isStale, true);
-  await assert.rejects(createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation }), { code: 'APPROVED_REQUIREMENTS_REQUIRED' });
+  const afterModification = await createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation });
+  assert.deepEqual(afterModification.requirementIds, [secondRequirement.id]);
 
   await review('APPROVED');
   const refreshedAnalysis = await createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation });
-  assert.deepEqual(refreshedAnalysis.requirementIds, [requirement.id]);
+  assert.deepEqual(new Set(refreshedAnalysis.requirementIds), new Set([requirement.id, secondRequirement.id]));
   await review('REJECTED');
   const staleAfterReject = await fetch(`${base}/projects/${projectId}/sdlc`);
   assert.equal((await staleAfterReject.json()).data.isStale, true);
-  await assert.rejects(createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation }), { code: 'APPROVED_REQUIREMENTS_REQUIRED' });
+  const afterRejection = await createSdlcAnalysis({ database: pool, projectId, generateOutput: explanation });
+  assert.deepEqual(afterRejection.requirementIds, [secondRequirement.id]);
 });

@@ -161,6 +161,24 @@ CREATE INDEX IF NOT EXISTS requirement_analysis_findings_type_severity_idx
 CREATE INDEX IF NOT EXISTS requirement_analysis_findings_requirement_ids_idx
   ON requirement_analysis_findings USING GIN (requirement_ids);
 
+-- Stakeholder responses remain auditable even when a later source analysis replaces its findings.
+CREATE TABLE IF NOT EXISTS clarification_answers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  analysis_run_id UUID NOT NULL,
+  finding_id UUID NOT NULL,
+  requirement_ids UUID[] NOT NULL CHECK (cardinality(requirement_ids) > 0),
+  question TEXT NOT NULL CHECK (length(trim(question)) BETWEEN 1 AND 1000),
+  answer TEXT NOT NULL CHECK (length(trim(answer)) BETWEEN 1 AND 5000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, finding_id, question)
+);
+CREATE INDEX IF NOT EXISTS clarification_answers_project_idx
+  ON clarification_answers (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS clarification_answers_requirement_ids_idx
+  ON clarification_answers USING GIN (requirement_ids);
+
 CREATE TABLE IF NOT EXISTS knowledge_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title VARCHAR(200) NOT NULL CHECK (length(trim(title)) > 0),

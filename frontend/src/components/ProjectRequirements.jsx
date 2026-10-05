@@ -37,6 +37,9 @@ export default function ProjectRequirements({ projectId }) {
   const [notice, setNotice] = useState('');
   const [intelligence, setIntelligence] = useState(null);
   const [findings, setFindings] = useState([]);
+  const [clarificationAnswers, setClarificationAnswers] = useState([]);
+  const [clarificationDrafts, setClarificationDrafts] = useState({});
+  const [clarificationBusy, setClarificationBusy] = useState('');
   const [sdlc, setSdlc] = useState(null);
   const [sdlcBusy, setSdlcBusy] = useState(false);
   const resultRequest = useRef(0);
@@ -78,12 +81,13 @@ export default function ProjectRequirements({ projectId }) {
     setError('');
     if(!inputId){setLoadingResult(false);return;}
     setLoadingResult(true);
-    Promise.all([api.projectRequirements(projectId,inputId),api.projectRequirementAnalysis(projectId,inputId)])
-      .then(([sourceRequirements,sourceAnalysis])=>{
+    Promise.all([api.projectRequirements(projectId,inputId),api.projectRequirementAnalysis(projectId,inputId),api.projectClarificationAnswers(projectId)])
+      .then(([sourceRequirements,sourceAnalysis,answers])=>{
         if(requestId!==resultRequest.current)return;
         const validRequirements=sourceRequirements.filter((requirement)=>requirement.sourceInputId===inputId);
         const resultMatches=sourceAnalysis.sourceInputId===inputId&&(!sourceAnalysis.analysis||sourceAnalysis.analysis.sourceInputId===inputId);
         setRequirements(validRequirements);
+        setClarificationAnswers(Array.isArray(answers) ? answers : []);
         if(resultMatches){
           const validIds=new Set(validRequirements.map((requirement)=>requirement.id));
           const validFindings=sourceAnalysis.findings.filter((finding)=>finding.requirementIds.length>0&&finding.requirementIds.every((id)=>validIds.has(id)));
@@ -94,6 +98,30 @@ export default function ProjectRequirements({ projectId }) {
       .catch((requestError)=>{if(requestId===resultRequest.current)setError(requestErrorMessage(requestError));})
       .finally(()=>{if(requestId===resultRequest.current)setLoadingResult(false);});
   },[projectId,inputId]);
+
+  async function saveClarification(item) {
+    const draftKey = `${item.findingId}:${item.question}`;
+    setClarificationBusy(draftKey); setError(''); setNotice('');
+    try {
+      const saved = await api.saveClarificationAnswer(projectId, { ...item, answer: clarificationDrafts[draftKey] || '' });
+      setClarificationAnswers((current) => [...current.filter((answer) => answer.findingId !== saved.findingId), saved]);
+      setClarificationDrafts((current) => ({ ...current, [draftKey]: saved.answer }));
+      setNotice('Stakeholder clarification saved as project context. Original source evidence is unchanged.');
+    } catch (requestError) { setError(requestErrorMessage(requestError)); }
+    finally { setClarificationBusy(''); }
+  }
+
+  async function refineWithAnswer(answer, requirementId) {
+    const busyKey = `${answer.id}:${requirementId}`;
+    setClarificationBusy(busyKey); setError(''); setNotice('');
+    try {
+      const updated = await api.refineRequirement(projectId, requirementId, answer.id);
+      setRequirements((current) => current.map((requirement) => requirement.id === updated.id ? { ...requirement, requirementText: updated.requirementText, reviewStatus: updated.reviewStatus, sourceEvidence: updated.sourceEvidence, sourceEvidenceStart: updated.sourceEvidenceStart, sourceEvidenceEnd: updated.sourceEvidenceEnd } : requirement));
+      setSdlc(await api.projectSdlc(projectId));
+      setNotice('Requirement refined using the saved clarification. Review and approve the modified wording before project SDLC analysis.');
+    } catch (requestError) { setError(requestErrorMessage(requestError)); }
+    finally { setClarificationBusy(''); }
+  }
 
   async function extract() {
     if (!inputId) return;
@@ -160,7 +188,16 @@ export default function ProjectRequirements({ projectId }) {
       {loadingResult&&<p className="state-message">Loading results for the selected source…</p>}
       {intelligence && intelligence.sourceInputId===inputId && <section className="analysis-section" aria-label="Requirements Intelligence results">
         <h3>Analysis · {intelligence.requirementCount} requirements · {intelligence.findingCount} findings</h3>
-        {!!clarificationQuestions.length && <div className="analysis-questions"><h3>Clarification questions</h3><ul>{clarificationQuestions.map((item) => <li key={item.findingId}>{item.question}</li>)}</ul></div>}
+        {!!clarificationQuestions.length && <div className="analysis-questions"><h3>Clarification questions</h3>{clarificationQuestions.map((item) => {
+          const finding = findings.find((entry) => entry.id === item.findingId);
+          const answer = clarificationAnswers.find((entry) => entry.findingId === item.findingId && entry.question === item.question);
+          const draftKey = `${item.findingId}:${item.question}`;
+          return <article className="analysis-finding" key={item.findingId}><p><strong>{item.question}</strong></p><small>{finding?.title || 'Related analysis finding'} · linked requirements: {item.requirementIds.map((id) => id.slice(0, 8)).join(', ')}</small>
+            <label>Stakeholder answer<textarea rows="3" maxLength="5000" value={clarificationDrafts[draftKey] ?? answer?.answer ?? ''} onChange={(event) => setClarificationDrafts((current) => ({ ...current, [draftKey]: event.target.value }))} placeholder="Record the stakeholder's answer." /></label>
+            <button type="button" disabled={clarificationBusy === draftKey || !(clarificationDrafts[draftKey] ?? answer?.answer ?? '').trim()} onClick={() => saveClarification({ findingId:item.findingId,analysisRunId:intelligence.id,requirementIds:item.requirementIds,question:item.question })}>{clarificationBusy === draftKey ? 'Saving…' : answer ? 'Update saved answer' : 'Save answer'}</button>
+            {answer && <div className="requirement-assumptions"><strong>Saved stakeholder context</strong><p>{answer.answer}</p><small>Saved {new Date(answer.updatedAt).toLocaleString()} · separate from original source evidence</small>{item.requirementIds.map((id) => <button key={id} type="button" disabled={Boolean(clarificationBusy)} onClick={() => refineWithAnswer(answer,id)}>{clarificationBusy === `${answer.id}:${id}` ? 'Refining…' : `Refine requirement ${id.slice(0,8)}`}</button>)}</div>}
+          </article>;
+        })}</div>}
         {!!findings.length && <div className="analysis-findings">{findings.map((finding) => <article className="analysis-finding" key={finding.id}><header><div><span className="eyebrow">{humanize(finding.findingType)} · confidence {(finding.confidence * 100).toFixed(0)}%</span><h3>{finding.title}</h3></div><span className="analysis-severity">{humanize(finding.severity)}</span></header><p className="analysis-description">{finding.description}</p>{finding.evidence.map((evidence) => <blockquote className="requirement-evidence" key={`${evidence.requirementId}-${evidence.quote}`}><small>Requirement {evidence.requirementId}</small>{evidence.quote}</blockquote>)}{finding.clarificationQuestion && <p><strong>Question:</strong> {finding.clarificationQuestion}</p>}</article>)}</div>}
         {intelligence.summary.intelligence && <>
           <div className="analysis-counts"><span>Retrieved knowledge sources: {knowledgeEvidence.length || 'No supporting knowledge-base evidence found.'}</span></div>
@@ -183,7 +220,7 @@ export default function ProjectRequirements({ projectId }) {
         <div className="requirement-assumptions"><strong>Assumptions</strong>{requirement.assumptions?.length ? <ul>{requirement.assumptions.map((assumption, index) => <li key={`${requirement.id}-${index}`}>{assumption}</li>)}</ul> : <span>None recorded</span>}</div>
         <div className="review-controls"><strong>Human review · {humanize(requirement.reviewStatus || 'DRAFT')}</strong><button type="button" onClick={() => reviewRequirement(requirement, 'REVIEWED')}>Mark reviewed</button><button type="button" onClick={() => reviewRequirement(requirement, 'APPROVED')}>Approve</button><button type="button" onClick={() => reviewRequirement(requirement, 'REJECTED')}>Reject</button><button type="button" onClick={() => reviewRequirement(requirement, 'MODIFIED')}>Modify</button></div>
       </article>)}</div>}
-      {!!requirements.length && <section className="analysis-section sdlc-section"><span className="eyebrow">AGENT 2 · SDLC + DOCUMENTATION</span><h3>Project delivery recommendation</h3><p>Approve source-linked requirements first. Deterministic factor scoring ranks delivery approaches; the configured LLM selects relevant computed factors for the explanation. Generated artefacts remain drafts until reviewed.</p><button className="button button-primary" type="button" onClick={runSdlc} disabled={sdlcBusy || !requirements.some((item) => item.reviewStatus === 'APPROVED')}>{sdlcBusy ? 'Analyzing…' : 'Run SDLC + documentation analysis'}</button>
+      {!!requirements.length && <section className="analysis-section sdlc-section"><span className="eyebrow">AGENT 2 · SDLC + DOCUMENTATION</span><h3>Project delivery recommendation</h3><p>This analysis uses the project’s current approved requirements across all source documents, including documents not selected above. Deterministic factor scoring ranks delivery approaches; the configured LLM selects relevant computed factors for the explanation. Generated artefacts remain drafts until reviewed.</p><button className="button button-primary" type="button" onClick={runSdlc} disabled={sdlcBusy || !requirements.some((item) => item.reviewStatus === 'APPROVED')}>{sdlcBusy ? 'Analyzing…' : 'Run project-level SDLC + documentation analysis'}</button>
         {sdlc?.isStale ? <p className="state-message" role="status">The saved SDLC analysis is stale because a requirement changed. Run the analysis again to use the current approved requirements.</p> : sdlc && <div className="sdlc-result"><h4>{humanize(sdlc.recommendation)} · {humanize(sdlc.status)}</h4><p>{sdlc.explanation}</p><h4>Ranking</h4><ol>{(sdlc.ranking || []).map((item) => <li key={item.method}>{humanize(item.method)} · score {item.score}</li>)}</ol><h4>Scored factors</h4><dl className="requirement-metadata">{Object.entries(sdlc.factors || {}).map(([factor,value]) => <div key={factor}><dt>{humanize(factor)}</dt><dd>{value}/5</dd></div>)}</dl><h4>Workflow</h4><ol>{(sdlc.workflow || []).map((item) => <li key={item.order}>{item.activity}</li>)}</ol><h4>Generated artefacts</h4>{(sdlc.artefacts || []).map((item) => <details key={item.type}><summary>{item.title} · {humanize(item.status)}</summary><pre>{item.content}</pre></details>)}<div className="review-controls"><button type="button" onClick={() => reviewSdlc('REVIEWED')}>Mark reviewed</button><button type="button" onClick={() => reviewSdlc('APPROVED')}>Approve recommendation and artefacts</button><button type="button" onClick={() => reviewSdlc('REJECTED')}>Reject</button></div></div>}
       </section>}
     </section>

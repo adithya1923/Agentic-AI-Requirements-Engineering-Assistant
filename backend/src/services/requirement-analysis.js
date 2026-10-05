@@ -325,3 +325,67 @@ export async function loadCurrentProjectAnalysis(database, projectId, sourceInpu
   const findings=rows.rows.filter((finding)=>finding.requirement_ids.length&&finding.requirement_ids.every((id)=>currentIds.has(id))).map((r)=>({id:r.id,analysisRunId:r.analysis_run_id,requirementIds:r.requirement_ids,agentNames:r.agent_names,findingType:r.finding_type,severity:r.severity,title:r.title,description:r.description,evidence:r.evidence,clarificationQuestion:r.clarification_question,confidence:Number(r.confidence),createdAt:r.created_at}));
   return {sourceInputId,analysis:{id:row.id,projectId:row.project_id,sourceInputId:row.source_input_id,requirementIds:row.requirement_ids,status:row.status,provider:row.provider,modelName:row.model_name,providerByAgent:row.provider_metadata,requirementCount:row.requirement_count,findingCount:findings.length,summary:row.summary,createdAt:row.created_at},findings};
 }
+
+export async function saveClarificationAnswer(database, projectId, { findingId, analysisRunId, requirementIds, question, answer }) {
+  const client = await database.connect();
+  try {
+    const finding = await client.query(`SELECT f.id,f.requirement_ids,a.id AS analysis_run_id
+      FROM requirement_analysis_findings f JOIN requirement_analysis_runs a ON a.id=f.analysis_run_id
+      WHERE f.id=$1 AND a.id=$2 AND a.project_id=$3 AND f.clarification_question=$4`, [findingId, analysisRunId, projectId, question]);
+    if (!finding.rowCount || JSON.stringify([...finding.rows[0].requirement_ids].sort()) !== JSON.stringify([...requirementIds].sort())) {
+      throw new RequirementAnalysisError('This clarification question is no longer current for the selected project.', 'CLARIFICATION_NOT_FOUND', 404);
+    }
+    const saved = await client.query(`INSERT INTO clarification_answers(project_id,analysis_run_id,finding_id,requirement_ids,question,answer)
+      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(project_id,finding_id,question)
+      DO UPDATE SET analysis_run_id=EXCLUDED.analysis_run_id,requirement_ids=EXCLUDED.requirement_ids,answer=EXCLUDED.answer,updated_at=now()
+      RETURNING *`, [projectId, analysisRunId, findingId, requirementIds, question, answer]);
+    return presentClarificationAnswer(saved.rows[0]);
+  } catch (error) {
+    if (error instanceof RequirementAnalysisError) throw error;
+    throw databaseFailure();
+  } finally { client.release(); }
+}
+
+export async function loadClarificationAnswers(database, projectId) {
+  const result = await database.query('SELECT * FROM clarification_answers WHERE project_id=$1 ORDER BY created_at,id', [projectId]);
+  return result.rows.map(presentClarificationAnswer);
+}
+
+export async function refineRequirementWithAnswer(database, projectId, requirementId, answerId, generateOutput = generateStructuredOutput) {
+  const context = await database.query(`SELECT r.*,a.question,a.answer FROM candidate_requirements r
+    JOIN clarification_answers a ON a.project_id=r.project_id AND r.id=ANY(a.requirement_ids)
+    WHERE r.project_id=$1 AND r.id=$2 AND a.id=$3`, [projectId, requirementId, answerId]);
+  if (!context.rowCount) throw new RequirementAnalysisError('The saved clarification answer is not linked to this project requirement.', 'CLARIFICATION_NOT_FOUND', 404);
+  const row = context.rows[0];
+  const schema = { type: 'object', additionalProperties: false, properties: { requirementText: { type: 'string', minLength: 1, maxLength: 3000 } }, required: ['requirementText'] };
+  let provider;
+  const raw = await generateOutput({
+    systemPrompt: 'Refine one requirement using the stakeholder clarification as context. Preserve the stated behavior, do not add details not supported by the original source evidence or stakeholder answer, and do not create a legal or regulatory conclusion. Return only requirementText.',
+    userPrompt: JSON.stringify({ currentRequirement: maskSensitiveText(row.requirement_text), sourceEvidence: maskSensitiveText(row.source_evidence), stakeholderClarification: { question: maskSensitiveText(row.question), answer: maskSensitiveText(row.answer) } }),
+    responseSchema: schema, modelPurpose: 'requirements-intelligence', maxTokens: 500,
+  }, { provider: config.generation.provider, fallbacks: [], retryAttempts: 1, timeoutMillis: config.generation.timeoutMillis, onProviderUsed: (value) => { provider = value; } });
+  let parsed;
+  try { parsed = typeof raw === 'string' ? JSON.parse(raw) : null; } catch { /* checked below */ }
+  const refined = parsed?.requirementText;
+  if (!parsed || Object.keys(parsed).length !== 1 || typeof refined !== 'string' || !refined.trim() || refined.trim().length > 3000) {
+    throw new RequirementAnalysisError('The configured model returned an invalid refinement. The requirement was not changed.', 'LLM_INVALID_RESPONSE', 502);
+  }
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(`UPDATE candidate_requirements SET requirement_text=$3,review_status='MODIFIED',review_note='Refined with saved stakeholder clarification; requires human review.',reviewed_at=now(),generation_provider=$4,generation_model=$5,updated_at=now()
+      WHERE id=$1 AND project_id=$2 RETURNING *`, [requirementId, projectId, refined.trim(), provider?.provider || config.generation.provider, provider?.model || (config.generation.provider === 'groq' ? config.generation.groqModel : config.generation.provider === 'gemini' ? config.generation.geminiModel : config.generation.model)]);
+    if (!updated.rowCount) throw new RequirementAnalysisError('Requirement not found in this project.', 'REQUIREMENT_NOT_FOUND', 404);
+    await client.query('UPDATE sdlc_analyses SET is_stale=true,updated_at=now() WHERE project_id=$1 AND is_stale=false', [projectId]);
+    await client.query('COMMIT');
+    return updated.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (error instanceof RequirementAnalysisError) throw error;
+    throw databaseFailure();
+  } finally { client.release(); }
+}
+
+function presentClarificationAnswer(row) {
+  return { id: row.id, projectId: row.project_id, analysisRunId: row.analysis_run_id, findingId: row.finding_id, requirementIds: row.requirement_ids, question: row.question, answer: row.answer, createdAt: row.created_at, updatedAt: row.updated_at };
+}
