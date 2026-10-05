@@ -96,10 +96,15 @@ export async function createSdlcAnalysis({ database, projectId, generateOutput =
   const selectedFactors = explanationResult.relevantFactors.map((name) => `${name.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)} ${factors[name]}/5`);
   const explanation = `${recommendation} is the deterministic top-ranked method with score ${ranking[0].score}. The configured model highlighted ${selectedFactors.join(', ')} as relevant project factors. The ranking is calculated deterministically from the approved, source-linked requirements.`;
   const modelName = provider?.model || (config.generation.provider === 'groq' ? config.generation.groqModel : config.generation.provider === 'ollama' ? config.generation.model : config.generation.geminiModel);
-  const saved = await database.query(`INSERT INTO sdlc_analyses(project_id,factors,ranking,recommendation,explanation,workflow,artefacts,requirement_ids,provider,model_name) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [projectId, factors, JSON.stringify(ranking), recommendation, explanation, JSON.stringify(workflow), JSON.stringify(artefacts), ids, provider?.provider || config.generation.provider, modelName]);
+  const approvedSnapshot = JSON.stringify([...requirements].sort((a, b) => a.id.localeCompare(b.id)).map(({ id, requirement_text, review_status }) => ({ id, text: requirement_text, status: review_status })));
+  const saved = await database.query(`INSERT INTO sdlc_analyses(project_id,factors,ranking,recommendation,explanation,workflow,artefacts,requirement_ids,provider,model_name,is_stale)
+    VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'text',requirement_text,'status',review_status) ORDER BY id)
+        FROM candidate_requirements WHERE project_id=$1 AND extraction_status='COMPLETED' AND review_status='APPROVED'),'[]'::jsonb) IS DISTINCT FROM $11::jsonb)
+    RETURNING *`, [projectId, factors, JSON.stringify(ranking), recommendation, explanation, JSON.stringify(workflow), JSON.stringify(artefacts), ids, provider?.provider || config.generation.provider, modelName, approvedSnapshot]);
   return presentSdlcAnalysis(saved.rows[0]);
 }
 
 export function presentSdlcAnalysis(row) {
-  return { id: row.id, projectId: row.project_id, status: row.status, factors: row.factors, ranking: row.ranking, recommendation: row.recommendation, explanation: row.explanation, workflow: row.workflow, artefacts: row.artefacts, requirementIds: row.requirement_ids, provider: row.provider, modelName: row.model_name, reviewNote: row.review_note, reviewedAt: row.reviewed_at, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, projectId: row.project_id, status: row.status, isStale: row.is_stale ?? false, factors: row.factors, ranking: row.ranking, recommendation: row.recommendation, explanation: row.explanation, workflow: row.workflow, artefacts: row.artefacts, requirementIds: row.requirement_ids, provider: row.provider, modelName: row.model_name, reviewNote: row.review_note, reviewedAt: row.reviewed_at, createdAt: row.created_at, updatedAt: row.updated_at };
 }

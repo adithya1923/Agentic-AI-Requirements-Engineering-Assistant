@@ -7,6 +7,7 @@ import Projects from './pages/Projects.jsx';
 import ProjectDetail from './pages/ProjectDetail.jsx';
 import InputDetail from './pages/InputDetail.jsx';
 import KnowledgeBase from './pages/KnowledgeBase.jsx';
+import { Component } from 'react';
 
 function App() {
   const [projects, setProjects] = useState([]);
@@ -56,6 +57,7 @@ function App() {
       </header>
 
       <main className="main-content">
+        <AppErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Dashboard projects={projects} loading={loading} error={error} onCreate={() => setFormOpen(true)} />} />
           <Route path="/projects" element={<Projects projects={projects} loading={loading} error={error} onCreate={() => setFormOpen(true)} />} />
@@ -64,6 +66,7 @@ function App() {
           <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="*" element={<section className="page-section"><h1>Page not found</h1><Link to="/">Return to overview</Link></section>} />
         </Routes>
+        </AppErrorBoundary>
       </main>
 
       <footer className="footer"><span>Financial-Sector Requirements Assistant <span className="footer-dot">·</span> Two-agent advisory workflow</span><span>Multi-domain</span></footer>
@@ -71,6 +74,17 @@ function App() {
       {formOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setFormOpen(false); }}><ProjectForm onCreate={createProject} onCancel={() => setFormOpen(false)} /></div>}
     </div>
   );
+}
+
+class AppErrorBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() { return { hasError: true }; }
+
+  render() {
+    if (this.state.hasError) return <section className="page-section"><h1>This page could not be displayed</h1><p className="state-error" role="alert">The project data could not be rendered. Return to Projects and reopen the page.</p><Link to="/projects">← All projects</Link></section>;
+    return this.props.children;
+  }
 }
 
 export default App;

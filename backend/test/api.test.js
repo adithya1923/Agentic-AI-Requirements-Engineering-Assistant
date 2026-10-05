@@ -26,6 +26,17 @@ test('health endpoint reports the API is running', async () => {
   });
 });
 
+test('development CORS accepts localhost when the configured frontend uses the equivalent loopback address', async () => {
+  const response = await fetch(`${baseUrl}/api/health`, { headers: { Origin: 'http://localhost:5173' } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+});
+
+test('CORS continues to reject unrelated origins', async () => {
+  const response = await fetch(`${baseUrl}/api/health`, { headers: { Origin: 'https://untrusted.example' } });
+  assert.equal(response.headers.get('access-control-allow-origin'), null);
+});
+
 test('database health check reports a connected or unavailable database without exposing internals', async () => {
   const response = await fetch(`${baseUrl}/api/health/db`);
   const payload = await response.json();

@@ -25,9 +25,15 @@ export function createSdlcRouter({ database = pool, generateOutput } = {}) {
     const { status, note = '', requirementText } = req.body || {};
     if (!STATES.has(status) || typeof note !== 'string' || note.length > 1000 || (requirementText !== undefined && (typeof requirementText !== 'string' || !requirementText.trim() || requirementText.length > 3000)) || (status === 'MODIFIED' && requirementText === undefined)) return fail(res, 400, 'Provide a supported review status, a note up to 1000 characters, and revised requirementText when status is MODIFIED.', 'VALIDATION_ERROR');
     try {
-      const result = await database.query(`UPDATE candidate_requirements SET review_status=$2,review_note=$3,reviewed_at=now(),requirement_text=CASE WHEN $2='MODIFIED' THEN $4 ELSE requirement_text END,updated_at=now() WHERE id=$1 RETURNING *`, [req.params.id, status, note.trim() || null, requirementText?.trim() || null]);
+      const result = await database.query(`WITH changed AS (
+        UPDATE candidate_requirements SET review_status=$2,review_note=$3,reviewed_at=now(),requirement_text=CASE WHEN $2='MODIFIED' THEN $4 ELSE requirement_text END,updated_at=now()
+        WHERE id=$1 RETURNING *
+      ), invalidated AS (
+        UPDATE sdlc_analyses a SET is_stale=true,updated_at=now()
+        FROM changed c WHERE a.project_id=c.project_id AND a.is_stale=false RETURNING a.id
+      ) SELECT changed.* FROM changed`, [req.params.id, status, note.trim() || null, requirementText?.trim() || null]);
       if (!result.rowCount) return fail(res, 404, 'Requirement not found.', 'REQUIREMENT_NOT_FOUND');
-      return res.json({ data: { id: result.rows[0].id, reviewStatus: result.rows[0].review_status, reviewNote: result.rows[0].review_note, reviewedAt: result.rows[0].reviewed_at, requirementText: result.rows[0].requirement_text, sourceEvidence: result.rows[0].source_evidence } });
+      return res.json({ data: { id: result.rows[0].id, reviewStatus: result.rows[0].review_status, reviewNote: result.rows[0].review_note, reviewedAt: result.rows[0].reviewed_at, requirementText: result.rows[0].requirement_text, sourceEvidence: result.rows[0].source_evidence, sourceEvidenceStart: result.rows[0].source_evidence_start, sourceEvidenceEnd: result.rows[0].source_evidence_end } });
     } catch { return fail(res, 503, 'Unable to save the requirement review state.', 'DATABASE_ERROR'); }
   });
   router.patch('/sdlc/:id/review', async (req, res) => {

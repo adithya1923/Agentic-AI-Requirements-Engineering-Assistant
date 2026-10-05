@@ -43,7 +43,7 @@ test('Agent 2 scores approved persisted requirements and saves explanation, rank
   const db = { async query(sql, params) {
     calls.push({ sql, params });
     if (sql.includes('FROM projects')) return { rowCount: 1, rows: [{ id: 'project-1', name: 'Synthetic project', selected_domain: 'General Financial' }] };
-    if (sql.includes('FROM candidate_requirements')) return { rowCount: 1, rows: [req] };
+    if (sql.includes('FROM candidate_requirements') && !sql.includes('INSERT INTO sdlc_analyses')) return { rowCount: 1, rows: [req] };
     if (sql.includes('FROM requirement_analysis_findings')) return { rowCount: 1, rows: [{ severity: 'MEDIUM', finding_type: 'AMBIGUITY' }] };
     if (sql.includes('INSERT INTO sdlc_analyses')) return { rowCount: 1, rows: [{ id: 'analysis-1', project_id: params[0], status: 'DRAFT', factors: params[1], ranking: JSON.parse(params[2]), recommendation: params[3], explanation: params[4], workflow: JSON.parse(params[5]), artefacts: JSON.parse(params[6]), requirement_ids: params[7], provider: params[8], model_name: params[9], created_at: new Date(), updated_at: new Date() }] };
     throw new Error(`Unexpected query: ${sql}`);

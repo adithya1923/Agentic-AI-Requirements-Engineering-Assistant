@@ -279,6 +279,7 @@ async function persist(database, projectId, input, out, provider, kb) {
     await client.query('BEGIN');
     await client.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
     await client.query('DELETE FROM candidate_requirements WHERE project_id=$1 AND source_input_id=$2', [projectId,input.id]);
+    await client.query('UPDATE sdlc_analyses SET is_stale=true,updated_at=now() WHERE project_id=$1 AND is_stale=false', [projectId]);
     const saved = new Map();
     const requirements = [];
     for (let i=0; i<out.normalizedRequirements.length; i++) {

@@ -14,7 +14,18 @@ import { createSdlcRouter } from './routes/sdlc.js';
 export function createApp(options = {}) {
   const app = express();
   app.disable('x-powered-by');
-  app.use(cors({ origin: config.frontendOrigin }));
+  const allowedOrigins = new Set([config.frontendOrigin]);
+  try {
+    const configuredOrigin = new URL(config.frontendOrigin);
+    if (configuredOrigin.hostname === '127.0.0.1') {
+      configuredOrigin.hostname = 'localhost';
+      allowedOrigins.add(configuredOrigin.origin);
+    } else if (configuredOrigin.hostname === 'localhost') {
+      configuredOrigin.hostname = '127.0.0.1';
+      allowedOrigins.add(configuredOrigin.origin);
+    }
+  } catch { /* An invalid configured origin remains blocked by the CORS check. */ }
+  app.use(cors({ origin: [...allowedOrigins] }));
   app.use(express.json({ limit: '1mb' }));
   app.use('/api/health', healthRoutes);
   app.use('/api/projects', projectRoutes);

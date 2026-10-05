@@ -24,7 +24,7 @@ function InputCard({ input, projectId }) {
         <span>{typeLabel} · {input.source}</span>
         {input.originalFilename && <small>{input.originalFilename}</small>}
       </span>
-      <span className={`processing-state ${input.processingStatus.toLowerCase()}`}>{input.processingStatus.toLowerCase()}</span>
+      <span className={`processing-state ${(input.processingStatus || 'unknown').toLowerCase()}`}>{(input.processingStatus || 'status unavailable').toLowerCase()}</span>
       <span className="input-open-arrow" aria-hidden="true">↗</span>
     </Link>
   );

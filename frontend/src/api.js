@@ -20,7 +20,7 @@ async function request(path, options = {}) {
     error.payload = payload;
     throw error;
   }
-  return payload.data ?? payload;
+  return Object.hasOwn(payload, 'data') ? payload.data : payload;
 }
 
 export const api = {

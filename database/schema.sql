@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS sdlc_analyses (
   workflow JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(workflow) = 'array'),
   artefacts JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(artefacts) = 'array'),
   requirement_ids UUID[] NOT NULL DEFAULT '{}',
+  is_stale BOOLEAN NOT NULL DEFAULT false,
   provider TEXT NOT NULL,
   model_name VARCHAR(120) NOT NULL,
   review_note TEXT,
@@ -254,6 +255,16 @@ CREATE TABLE IF NOT EXISTS sdlc_analyses (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema=current_schema() AND table_name='sdlc_analyses' AND column_name='is_stale'
+  ) THEN
+    -- Results created before dependency tracking cannot be certified current.
+    ALTER TABLE sdlc_analyses ADD COLUMN is_stale BOOLEAN NOT NULL DEFAULT true;
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS sdlc_analyses_project_idx ON sdlc_analyses(project_id, created_at DESC);
 
 INSERT INTO users (id, display_name, email, role)
